@@ -1,0 +1,69 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <title>PAM Gateway — Xin quyền truy cập</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PAM Gateway</h1>
+            <p class="subtitle">Xin quyền truy cập server (JIT Access)</p>
+        </header>
+
+        <section class="card">
+            <h2>Xin quyền mới</h2>
+            <form
+                hx-post="/access-requests"
+                hx-target="#requests-table-wrapper"
+                hx-swap="innerHTML"
+                hx-on::after-request="this.reset()"
+            >
+                <div class="form-row">
+                    <label for="server_id">Server</label>
+                    <select name="server_id" id="server_id" required>
+                        {% for s in servers %}
+                        <option value="{{ s.id }}">{{ s.name }} ({{ ", ".join(s.tags) }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <label for="reason">Lý do</label>
+                    <input
+                        type="text"
+                        name="reason"
+                        id="reason"
+                        placeholder="VD: Vá lỗi DB prod theo ticket #123"
+                        required
+                    />
+                </div>
+
+                <div class="form-row">
+                    <label for="requested_minutes">Thời lượng (phút)</label>
+                    <input
+                        type="number"
+                        name="requested_minutes"
+                        id="requested_minutes"
+                        value="60"
+                        min="5"
+                        max="480"
+                        required
+                    />
+                </div>
+
+                <button type="submit">Gửi yêu cầu</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <h2>Yêu cầu của tôi</h2>
+            <div id="requests-table-wrapper">
+                {% include "_requests_table.html" %}
+            </div>
+        </section>
+    </div>
+</body>
+</html>

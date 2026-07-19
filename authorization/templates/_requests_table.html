@@ -1,0 +1,49 @@
+﻿{% if not access_requests %}
+<p class="empty">Chưa có yêu cầu nào.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Server</th>
+            <th>Lý do</th>
+            <th>Thời lượng</th>
+            <th>Trạng thái</th>
+            <th>Thời gian gửi</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in access_requests %}
+        <tr>
+            <td>{{ r.server.name if r.server else "?" }}</td>
+            <td>{{ r.reason }}</td>
+            <td>{{ r.requested_minutes }} phút</td>
+            <td>
+                <span class="badge badge-{{ r.status }}">{{ r.status }}</span>
+            </td>
+            <td>{{ r.requested_at.strftime("%H:%M %d/%m") }}</td>
+            <td>
+                {% if r.status == "pending" %}
+                <button
+                    class="btn-small btn-approve"
+                    hx-post="/access-requests/{{ r.id }}/approve"
+                    hx-target="#requests-table-wrapper"
+                    hx-swap="innerHTML"
+                >
+                    Duyệt
+                </button>
+                <button
+                    class="btn-small btn-reject"
+                    hx-post="/access-requests/{{ r.id }}/reject"
+                    hx-target="#requests-table-wrapper"
+                    hx-swap="innerHTML"
+                >
+                    Từ chối
+                </button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}

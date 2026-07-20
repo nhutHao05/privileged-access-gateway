@@ -1,0 +1,65 @@
+{% if not groups %}
+<p class="empty">Chưa có nhóm nào.</p>
+{% else %}
+{% for g in groups %}
+<div class="group-block">
+    <h3>
+        {{ g.name }}
+        <span class="group-members">
+            {% for m in g.members %}
+            <span class="tag-chip">{{ m }}</span>
+            {% endfor %}
+        </span>
+    </h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Server</th>
+                <th>Được phép</th>
+                <th>Thời lượng tối đa (phút)</th>
+                <th>Cần duyệt</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in servers %}
+            {% set policy = g.policies.get(s.id) %}
+            <tr>
+                <td>{{ s.name }}</td>
+                <td class="checkbox-cell">
+                    <input type="checkbox" name="enabled" {% if policy %}checked{% endif %} />
+                </td>
+                <td>
+                    <input
+                        type="number"
+                        name="max_duration_minutes"
+                        min="5"
+                        max="480"
+                        value="{{ policy.max_duration_minutes if policy else 60 }}"
+                    />
+                </td>
+                <td class="checkbox-cell">
+                    <input
+                        type="checkbox"
+                        name="requires_approval"
+                        {% if (policy and policy.requires_approval) or not policy %}checked{% endif %}
+                    />
+                </td>
+                <td>
+                    <button
+                        class="btn-small btn-approve"
+                        hx-post="/groups/{{ g.id }}/servers/{{ s.id }}/policy"
+                        hx-include="closest tr"
+                        hx-target="#groups-table-wrapper"
+                        hx-swap="innerHTML"
+                    >
+                        Lưu
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+{% endif %}

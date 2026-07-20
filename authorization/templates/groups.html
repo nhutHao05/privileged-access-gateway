@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <title>PAM Gateway — Nhóm & phân quyền</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <div class="container container-wide">
+        <header>
+            <h1>PAM Gateway</h1>
+            <p class="subtitle">Nhóm & phân quyền (RBAC)</p>
+            <nav class="nav">
+                <a href="/">Xin quyền</a>
+                <a href="/servers">Quản lý server</a>
+                <a href="/active-grants">Quyền đang active</a>
+                <a href="/groups" class="active">Nhóm & phân quyền</a>
+            </nav>
+        </header>
+
+        <section class="card">
+            <h2>Nhóm & server được phép truy cập</h2>
+            <p class="note">
+                Thành viên nhóm do Inh đồng bộ định kỳ từ Keycloak — không
+                sửa được ở đây. Mỗi dòng là chính sách của nhóm đối với 1
+                server: tick "Được phép" để cho xin quyền, chỉnh thời lượng
+                tối đa và có cần duyệt hay không, rồi bấm Lưu.
+            </p>
+            <div id="groups-table-wrapper">
+                {% include "_groups_table.html" %}
+            </div>
+        </section>
+    </div>
+</body>
+</html>

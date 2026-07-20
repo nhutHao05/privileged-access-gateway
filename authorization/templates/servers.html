@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <title>PAM Gateway — Quản lý server</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PAM Gateway</h1>
+            <p class="subtitle">Quản lý server (chỉ sửa tên / tag)</p>
+            <nav class="nav">
+                <a href="/">Xin quyền</a>
+                <a href="/servers" class="active">Quản lý server</a>
+            </nav>
+        </header>
+
+        <section class="card">
+            <h2>Danh sách server</h2>
+            <p class="note">
+                Server được đồng bộ tự động từ Guacamole. Ở đây chỉ có thể
+                sửa tên hiển thị và tag — không thêm hoặc xóa server.
+            </p>
+            <div id="servers-table-wrapper">
+                {% include "_servers_table.html" %}
+            </div>
+        </section>
+    </div>
+</body>
+</html>

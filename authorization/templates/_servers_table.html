@@ -1,0 +1,75 @@
+{% if not servers %}
+<p class="empty">Chưa có server nào.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Tên server</th>
+            <th>Tag</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in servers %}
+        {% if editing_id == s.id %}
+        <tr>
+            <td>
+                <input
+                    type="text"
+                    name="name"
+                    value="{{ s.name }}"
+                    placeholder="Tên server"
+                />
+            </td>
+            <td>
+                <input
+                    type="text"
+                    name="tags"
+                    value="{{ s.tags | join(', ') }}"
+                    placeholder="VD: prod, db"
+                />
+            </td>
+            <td>
+                <button
+                    class="btn-small btn-approve"
+                    hx-post="/servers/{{ s.id }}/edit"
+                    hx-include="closest tr"
+                    hx-target="#servers-table-wrapper"
+                    hx-swap="innerHTML"
+                >
+                    Lưu
+                </button>
+                <button
+                    class="btn-small btn-reject"
+                    hx-get="/servers/table"
+                    hx-target="#servers-table-wrapper"
+                    hx-swap="innerHTML"
+                >
+                    Hủy
+                </button>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td>{{ s.name }}</td>
+            <td>
+                {% for tag in s.tags %}
+                <span class="tag-chip">{{ tag }}</span>
+                {% endfor %}
+            </td>
+            <td>
+                <button
+                    class="btn-small btn-edit"
+                    hx-get="/servers/{{ s.id }}/edit-row"
+                    hx-target="#servers-table-wrapper"
+                    hx-swap="innerHTML"
+                >
+                    Sửa
+                </button>
+            </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}

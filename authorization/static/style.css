@@ -23,7 +23,30 @@ header h1 {
 
 .subtitle {
     color: #666;
-    margin: 0 0 24px;
+    margin: 0 0 16px;
+}
+
+.nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.nav a {
+    text-decoration: none;
+    color: #444;
+    background: #fff;
+    border: 1px solid #e2e2e2;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.nav a.active {
+    background: #2f5496;
+    color: #fff;
+    border-color: #2f5496;
 }
 
 .card {
@@ -37,6 +60,12 @@ header h1 {
 .card h2 {
     font-size: 16px;
     margin: 0 0 16px;
+}
+
+.note {
+    color: #777;
+    font-size: 13px;
+    margin: -8px 0 16px;
 }
 
 .form-row {
@@ -93,6 +122,14 @@ th {
     text-transform: uppercase;
 }
 
+td input[type="text"] {
+    padding: 6px 8px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 13px;
+    width: 100%;
+}
+
 .badge {
     padding: 2px 8px;
     border-radius: 10px;
@@ -115,6 +152,16 @@ th {
     color: #721c24;
 }
 
+.tag-chip {
+    display: inline-block;
+    background: #eef1f6;
+    color: #444;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    margin-right: 4px;
+}
+
 .btn-small {
     border: none;
     padding: 4px 10px;
@@ -131,6 +178,11 @@ th {
 
 .btn-reject {
     background: #e03131;
+    color: #fff;
+}
+
+.btn-edit {
+    background: #2f5496;
     color: #fff;
 }
 

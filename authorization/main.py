@@ -1,7 +1,7 @@
 """
 PAM Gateway — Authorization & UI module
-Màn "Xin quyền" (access request) — bản demo dùng MOCK DATA
-(chưa nối API thật của Inh, để code UI trước không bị block)
+Màn "Xin quyền" (access request) + màn "Quản lý server" (chỉ Sửa tên/tag)
+— bản demo dùng MOCK DATA (chưa nối API thật của Inh)
 
 Chạy thử:
     uvicorn main:app --reload
@@ -23,9 +23,13 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ---------------------------------------------------------------------------
 # MOCK DATA — sau này thay bằng gọi API thật của Inh (GET /api/servers,
-# POST /api/access-requests, ...). Cấu trúc field đặt đúng snake_case như
-# đã chốt trong RBAC-API-Spec-Draft để lúc thay API thật không phải sửa
-# template.
+# POST /api/access-requests, PATCH /api/servers/{id} ...). Cấu trúc field
+# đặt đúng snake_case như đã chốt trong RBAC-API-Spec-Draft để lúc thay
+# API thật không phải sửa template.
+#
+# LƯU Ý: server do Inh import từ Guacamole — UI ở đây chỉ được SỬA
+# (tên, tag), KHÔNG được Thêm/Xóa. Không có route nào thêm hoặc xóa
+# server trong file này.
 # ---------------------------------------------------------------------------
 
 MOCK_SERVERS = [
@@ -43,7 +47,7 @@ def find_server(server_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Routes — Xin quyền (access requests)
 # ---------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
@@ -114,4 +118,72 @@ def reject_request(request: Request, request_id: str):
         request,
         "_requests_table.html",
         {"access_requests": list(reversed(access_requests_db))},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routes — Quản lý server (CHỈ Sửa tên/tag — không Thêm, không Xóa)
+# ---------------------------------------------------------------------------
+
+@app.get("/servers", response_class=HTMLResponse)
+def servers_page(request: Request):
+    """Trang quản lý server: bảng danh sách server, có thể Sửa từng dòng."""
+    return templates.TemplateResponse(
+        request,
+        "servers.html",
+        {"servers": MOCK_SERVERS, "editing_id": None},
+    )
+
+
+@app.get("/servers/table", response_class=HTMLResponse)
+def servers_table(request: Request):
+    """
+    Trả về fragment bảng server ở chế độ xem thường (không có dòng nào
+    đang sửa). Dùng khi bấm nút 'Hủy' để thoát chế độ sửa.
+    """
+    return templates.TemplateResponse(
+        request,
+        "_servers_table.html",
+        {"servers": MOCK_SERVERS, "editing_id": None},
+    )
+
+
+@app.get("/servers/{server_id}/edit-row", response_class=HTMLResponse)
+def edit_server_row(request: Request, server_id: str):
+    """
+    Bấm nút 'Sửa' ở 1 dòng -> trả lại cả bảng, nhưng dòng có server_id này
+    hiển thị dạng ô nhập (input) thay vì chữ thường.
+    """
+    return templates.TemplateResponse(
+        request,
+        "_servers_table.html",
+        {"servers": MOCK_SERVERS, "editing_id": server_id},
+    )
+
+
+@app.post("/servers/{server_id}/edit", response_class=HTMLResponse)
+def save_server_edit(
+    request: Request,
+    server_id: str,
+    name: str = Form(...),
+    tags: str = Form(""),
+):
+    """
+    Tương ứng PATCH /api/servers/{id} trong spec (khi Inh có API thật,
+    chỗ này chỉ cần thay đoạn cập nhật MOCK_SERVERS bằng lệnh gọi API).
+
+    - name: tên server, không được để trống.
+    - tags: chuỗi các tag cách nhau bởi dấu phẩy, ví dụ "prod, db".
+    """
+    server = find_server(server_id)
+    if server is not None:
+        clean_name = name.strip()
+        if clean_name:
+            server["name"] = clean_name
+        server["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+
+    return templates.TemplateResponse(
+        request,
+        "_servers_table.html",
+        {"servers": MOCK_SERVERS, "editing_id": None},
     )

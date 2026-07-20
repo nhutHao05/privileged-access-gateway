@@ -1,0 +1,51 @@
+{% if not grants %}
+<p class="empty">Chưa có quyền nào được duyệt.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Server</th>
+            <th>Lý do</th>
+            <th>Trạng thái</th>
+            <th>Còn lại</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for g in grants %}
+        <tr>
+            <td>{{ g.server.name if g.server else "?" }}</td>
+            <td>{{ g.reason }}</td>
+            <td>
+                {% if g.grant_status == "active" %}
+                <span class="badge badge-active">Đang hoạt động</span>
+                {% elif g.grant_status == "expired" %}
+                <span class="badge badge-expired">Đã hết hạn</span>
+                {% else %}
+                <span class="badge badge-revoked">Đã thu hồi</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if g.grant_status == "active" %}
+                {{ g.remaining_text }}
+                {% else %}
+                —
+                {% endif %}
+            </td>
+            <td>
+                {% if g.grant_status == "active" %}
+                <button
+                    class="btn-small btn-reject"
+                    hx-post="/active-grants/{{ g.id }}/revoke"
+                    hx-target="#active-grants-wrapper"
+                    hx-swap="innerHTML"
+                >
+                    Thu hồi ngay
+                </button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}

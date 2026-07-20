@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <title>PAM Gateway — Quyền đang active</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PAM Gateway</h1>
+            <p class="subtitle">Quyền truy cập đang active (JIT Access)</p>
+            <nav class="nav">
+                <a href="/">Xin quyền</a>
+                <a href="/servers">Quản lý server</a>
+                <a href="/active-grants" class="active">Quyền đang active</a>
+            </nav>
+        </header>
+
+        <section class="card">
+            <h2>Danh sách quyền đã duyệt</h2>
+            <p class="note">
+                Khi hết thời gian, quyền sẽ tự động bị thu hồi (scheduler
+                thật do Inh phụ trách). Nút "Thu hồi ngay" ở đây chỉ để demo
+                trước khi có scheduler thật.
+            </p>
+            <div
+                id="active-grants-wrapper"
+                hx-get="/active-grants/table"
+                hx-trigger="every 5s"
+                hx-swap="innerHTML"
+            >
+                {% include "_active_grants_table.html" %}
+            </div>
+        </section>
+    </div>
+</body>
+</html>

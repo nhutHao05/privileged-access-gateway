@@ -1,0 +1,14 @@
+{# 
+  Template này bọc _requests_table.html + banner báo lỗi/thành công.
+  Dùng hx-swap-oob để cập nhật banner (#request-error) NẰM NGOÀI vùng
+  #requests-table-wrapper mà form đang hx-target tới -- xem ghi chú
+  trong index.html chỗ <div id="request-error">.
+#}
+{% if error %}
+<div id="request-error" class="alert alert-error" hx-swap-oob="true">{{ error }}</div>
+{% elif success %}
+<div id="request-error" class="alert alert-success" hx-swap-oob="true">{{ success }}</div>
+{% else %}
+<div id="request-error" hx-swap-oob="true"></div>
+{% endif %}
+{% include "_requests_table.html" %}

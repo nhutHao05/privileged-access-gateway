@@ -1,3 +1,8 @@
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% elif success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
 {% if not servers %}
 <p class="empty">Chưa có server nào.</p>
 {% else %}

@@ -78,6 +78,31 @@ def find_server(server_id: str) -> dict | None:
     return next((s for s in MOCK_SERVERS if s["id"] == server_id), None)
 
 
+def find_group(group_id: str) -> dict | None:
+    return next((g for g in MOCK_GROUPS if g["id"] == group_id), None)
+
+
+def get_policy(group_id: str, server_id: str) -> dict | None:
+    """Trả về policy (max_duration_minutes, requires_approval) của 1 nhóm với
+    1 server, hoặc None nếu nhóm đó không được phép xin quyền vào server này."""
+    return GROUP_SERVER_POLICY.get(group_id, {}).get(server_id)
+
+
+def allowed_servers_for_group(group_id: str) -> list[dict]:
+    """
+    Danh sách server mà nhóm này ĐƯỢC PHÉP xin quyền, kèm theo policy
+    (max_duration_minutes, requires_approval) để hiển thị gợi ý trên form.
+    Đây chính là chỗ áp dụng group_server_policy — trước đây form "Xin
+    quyền" bỏ qua bảng này, cho chọn bừa server nào cũng được.
+    """
+    result = []
+    for s in MOCK_SERVERS:
+        policy = get_policy(group_id, s["id"])
+        if policy is not None:
+            result.append({**s, "policy": policy})
+    return result
+
+
 def build_groups_view() -> list[dict]:
     """Ghép mỗi nhóm với dict chính sách (server_id -> policy) của nó."""
     return [
@@ -119,13 +144,26 @@ def compute_grant_status(r: dict) -> tuple[str | None, str | None]:
 # ---------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    """Trang chính: form xin quyền + bảng 'Yêu cầu của tôi'."""
+def index(request: Request, group_id: str = MOCK_GROUPS[0]["id"]):
+    """
+    Trang chính: form xin quyền + bảng 'Yêu cầu của tôi'.
+
+    LƯU Ý TẠM THỜI: chưa có đăng nhập thật (Vinh + Inh chưa xong JWT
+    Keycloak), nên mình cho "đóng vai" 1 nhóm qua dropdown ở đầu trang
+    (query param ?group_id=...) để có thể demo & test validation theo
+    group_server_policy. Sau khi có JWT thật, group_id nên lấy từ user
+    đang đăng nhập (thuộc nhóm nào) thay vì cho tự chọn như thế này —
+    chỗ này chỉ cần thay input lấy group_id, phần validate bên dưới giữ
+    nguyên.
+    """
+    selected_group = find_group(group_id) or MOCK_GROUPS[0]
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "servers": MOCK_SERVERS,
+            "groups": MOCK_GROUPS,
+            "selected_group_id": selected_group["id"],
+            "allowed_servers": allowed_servers_for_group(selected_group["id"]),
             "access_requests": list(reversed(access_requests_db)),
         },
     )
@@ -134,6 +172,7 @@ def index(request: Request):
 @app.post("/access-requests", response_class=HTMLResponse)
 def create_access_request(
     request: Request,
+    group_id: str = Form(...),
     server_id: str = Form(...),
     reason: str = Form(...),
     requested_minutes: int = Form(...),
@@ -142,23 +181,60 @@ def create_access_request(
     Tương ứng POST /api/access-requests trong spec.
     HTMX gọi vào đây, nhận về đúng fragment HTML của bảng để swap vào trang
     (không reload cả trang).
+
+    Validate theo group_server_policy trước khi tạo request:
+    - Nhóm phải được phép xin quyền vào server đó (có policy).
+    - requested_minutes không được vượt max_duration_minutes của policy.
+    Nếu policy.requires_approval = False -> tự động approve luôn, không
+    cần chờ duyệt tay (đúng theo spec, trước đây bản cũ luôn để "pending").
     """
+    reason = reason.strip()
+    policy = get_policy(group_id, server_id)
+    error = None
+
+    if policy is None:
+        error = "Nhóm của bạn không được phép xin quyền vào server này."
+    elif not reason:
+        error = "Vui lòng nhập lý do xin quyền."
+    elif requested_minutes <= 0:
+        error = "Thời lượng phải lớn hơn 0 phút."
+    elif requested_minutes > policy["max_duration_minutes"]:
+        error = (
+            f"Thời lượng vượt quá mức tối đa nhóm bạn được phép "
+            f"({policy['max_duration_minutes']} phút)."
+        )
+
+    if error:
+        return templates.TemplateResponse(
+            request,
+            "_request_response.html",
+            {"access_requests": list(reversed(access_requests_db)), "error": error},
+        )
+
     server = find_server(server_id)
+    auto_approved = not policy["requires_approval"]
+    now = datetime.now()
 
     new_request = {
         "id": str(uuid.uuid4())[:8],
         "server": server,
         "reason": reason,
         "requested_minutes": requested_minutes,
-        "status": "pending",
-        "requested_at": datetime.now(),
+        "status": "approved" if auto_approved else "pending",
+        "requested_at": now,
     }
+    if auto_approved:
+        new_request["expires_at"] = now + timedelta(minutes=requested_minutes)
     access_requests_db.append(new_request)
 
+    success = "Đã tạo yêu cầu và tự động cấp quyền." if auto_approved else None
     return templates.TemplateResponse(
         request,
-        "_requests_table.html",
-        {"access_requests": list(reversed(access_requests_db))},
+        "_request_response.html",
+        {
+            "access_requests": list(reversed(access_requests_db)),
+            "success": success,
+        },
     )
 
 
@@ -171,7 +247,7 @@ def approve_request(request: Request, request_id: str):
             r["expires_at"] = datetime.now() + timedelta(minutes=r["requested_minutes"])
     return templates.TemplateResponse(
         request,
-        "_requests_table.html",
+        "_request_response.html",
         {"access_requests": list(reversed(access_requests_db))},
     )
 
@@ -184,7 +260,7 @@ def reject_request(request: Request, request_id: str):
             r["status"] = "rejected"
     return templates.TemplateResponse(
         request,
-        "_requests_table.html",
+        "_request_response.html",
         {"access_requests": list(reversed(access_requests_db))},
     )
 
@@ -233,7 +309,7 @@ def edit_server_row(request: Request, server_id: str):
 def save_server_edit(
     request: Request,
     server_id: str,
-    name: str = Form(...),
+    name: str = Form(""),
     tags: str = Form(""),
 ):
     """
@@ -244,16 +320,30 @@ def save_server_edit(
     - tags: chuỗi các tag cách nhau bởi dấu phẩy, ví dụ "prod, db".
     """
     server = find_server(server_id)
-    if server is not None:
-        clean_name = name.strip()
-        if clean_name:
-            server["name"] = clean_name
-        server["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+    clean_name = name.strip()
+
+    if server is None:
+        error = "Không tìm thấy server này (có thể đã bị Inh xóa/đổi bên Guacamole)."
+    elif not clean_name:
+        error = "Tên server không được để trống."
+    else:
+        error = None
+
+    if error:
+        # Giữ nguyên dòng đang ở chế độ sửa để người dùng sửa lại, kèm banner lỗi.
+        return templates.TemplateResponse(
+            request,
+            "_servers_table.html",
+            {"servers": MOCK_SERVERS, "editing_id": server_id, "error": error},
+        )
+
+    server["name"] = clean_name
+    server["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
 
     return templates.TemplateResponse(
         request,
         "_servers_table.html",
-        {"servers": MOCK_SERVERS, "editing_id": None},
+        {"servers": MOCK_SERVERS, "editing_id": None, "success": "Đã lưu thay đổi."},
     )
 
 

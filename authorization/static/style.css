@@ -250,3 +250,28 @@ td.checkbox-cell input[type="checkbox"] {
     color: #999;
     font-size: 13px;
 }
+
+.alert {
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 14px;
+}
+
+.alert-error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f1aeb5;
+}
+
+.alert-success {
+    background: #d3f9d8;
+    color: #2b8a3e;
+    border: 1px solid #a9e8b3;
+}
+
+.form-hint {
+    color: #888;
+    font-size: 12px;
+    margin: -10px 0 14px;
+}

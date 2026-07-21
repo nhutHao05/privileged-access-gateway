@@ -21,17 +21,47 @@
 
         <section class="card">
             <h2>Xin quyền mới</h2>
+
+            {#
+              CHƯA có đăng nhập thật (chờ Vinh + Inh xong JWT Keycloak), nên
+              cho "đóng vai" 1 nhóm bằng dropdown này để demo/test validation
+              theo group_server_policy. Đổi nhóm -> load lại trang (GET) với
+              ?group_id=... Sau này có JWT thật thì bỏ dropdown, lấy group_id
+              từ user đăng nhập.
+            #}
+            <form method="get" action="/" class="form-row" style="max-width: 260px;">
+                <label for="group_id">Đóng vai nhóm (demo, chờ đăng nhập thật)</label>
+                <select name="group_id" id="group_id" onchange="this.form.submit()">
+                    {% for g in groups %}
+                    <option value="{{ g.id }}" {% if g.id == selected_group_id %}selected{% endif %}>{{ g.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+
+            <div id="request-error"></div>
+
+            {% if not allowed_servers %}
+            <p class="empty">
+                Nhóm này chưa được phép xin quyền vào server nào. Vào mục
+                "Nhóm & phân quyền" để cấu hình.
+            </p>
+            {% else %}
             <form
                 hx-post="/access-requests"
                 hx-target="#requests-table-wrapper"
                 hx-swap="innerHTML"
-                hx-on::after-request="this.reset()"
+                hx-on::after-request="if(event.detail.successful) this.reset()"
             >
+                <input type="hidden" name="group_id" value="{{ selected_group_id }}" />
+
                 <div class="form-row">
                     <label for="server_id">Server</label>
                     <select name="server_id" id="server_id" required>
-                        {% for s in servers %}
-                        <option value="{{ s.id }}">{{ s.name }} ({{ ", ".join(s.tags) }})</option>
+                        {% for s in allowed_servers %}
+                        <option value="{{ s.id }}">
+                            {{ s.name }} ({{ ", ".join(s.tags) }}) — tối đa {{ s.policy.max_duration_minutes }} phút
+                            {% if not s.policy.requires_approval %}, tự động cấp{% endif %}
+                        </option>
                         {% endfor %}
                     </select>
                 </div>
@@ -59,9 +89,11 @@
                         required
                     />
                 </div>
+                <p class="form-hint">Thời lượng tối đa tùy theo server đã chọn ở trên, xem gợi ý trong dropdown.</p>
 
                 <button type="submit">Gửi yêu cầu</button>
             </form>
+            {% endif %}
         </section>
 
         <section class="card">

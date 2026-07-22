@@ -18,48 +18,126 @@ RAM. Đây là bước chuẩn bị trước.
 
 import httpx
 
-BASE_URL = "http://127.0.0.1:8080"  # TODO: đổi thành URL thật của Control Plane khi Inh cung cấp
+BASE_URL = "http://127.0.0.1:8000"  # URL Control Plane của Inh (theo Swagger: 127.0.0.1:8000/docs)
+# *** LƯU Ý: TRÙNG PORT với UI của mình! ***
+# uvicorn main:app (app của Nghĩa) mặc định cũng chạy ở port 8000. Nếu
+# chạy cả 2 cùng lúc trên 1 máy để test ghép API thật, sẽ bị đá port. Khi
+# đó chạy UI ở port khác, ví dụ:  uvicorn main:app --reload --port 8001
+# rồi vào http://127.0.0.1:8001 để test (giữ BASE_URL ở trên trỏ đúng
+# 127.0.0.1:8000 là Control Plane của Inh).
 USE_MOCK = True  # TODO: đổi thành False khi bắt đầu ghép API thật
 
 
 # ---------------------------------------------------------------------------
-# Servers — GET /api/servers, PATCH /api/servers/{server_id}
+# Servers — path Inh xác nhận 22/07: base "/servers/"
+# Lưu ý: server thật có thêm field "ip" (mock hiện tại của mình chỉ có
+# name + tags, CHƯA có ip — cần bổ sung khi ghép). Backend hỗ trợ đủ CRUD
+# (tạo/xóa được), dù trước đó nhóm chốt UI chỉ cho Sửa — cần hỏi lại
+# leader/Inh xem UI có nên mở thêm nút Thêm/Xóa hay giữ nguyên quyết định
+# cũ, chỉ dùng get_servers/update_server bên dưới.
 # ---------------------------------------------------------------------------
 
 async def get_servers() -> list[dict]:
-    """Trả về danh sách server. TODO: GET {BASE_URL}/api/servers"""
-    raise NotImplementedError("Chưa ghép API thật — dùng MOCK_SERVERS trong main.py")
+    """GET {BASE_URL}/servers/ — trả list server, mỗi item có thêm field
+    "ip" so với mock hiện tại (id, name, ip, tags)."""
+    return await _request("GET", "/servers/")
 
 
-async def update_server(server_id: str, name: str, tags: list[str]) -> dict:
-    """Sửa tên/tag server. TODO: PATCH {BASE_URL}/api/servers/{server_id}
-    body: {"name": name, "tags": tags}"""
-    raise NotImplementedError("Chưa ghép API thật — dùng MOCK_SERVERS trong main.py")
+async def get_server(server_id: str) -> dict:
+    """GET {BASE_URL}/servers/{server_id} — chi tiết 1 server."""
+    return await _request("GET", f"/servers/{server_id}")
+
+
+async def update_server(server_id: str, name: str, ip: str, tags: list[str]) -> dict:
+    """PATCH {BASE_URL}/servers/{server_id}
+    body: {"name": name, "ip": ip, "tags": tags}
+    (Có thêm "ip" so với bản mock trước đây — nhớ thêm ô nhập/hiển thị IP
+    trên form Sửa server.)"""
+    return await _request(
+        "PATCH", f"/servers/{server_id}", json={"name": name, "ip": ip, "tags": tags}
+    )
+
+
+async def create_server(name: str, ip: str, tags: list[str]) -> dict:
+    """POST {BASE_URL}/servers/ — backend hỗ trợ tạo mới, nhưng UI theo
+    quyết định cũ của nhóm là KHÔNG cho Thêm. Chỉ dùng hàm này nếu sau này
+    leader/nhóm đổi ý cho phép thêm server từ UI."""
+    return await _request(
+        "POST", "/servers/", json={"name": name, "ip": ip, "tags": tags}
+    )
+
+
+async def delete_server(server_id: str) -> None:
+    """DELETE {BASE_URL}/servers/{server_id} — tương tự create_server,
+    backend cho phép nhưng UI theo quyết định cũ là KHÔNG cho Xóa. Chỉ
+    dùng nếu nhóm đổi quyết định."""
+    await _request("DELETE", f"/servers/{server_id}")
 
 
 # ---------------------------------------------------------------------------
-# Groups & policy — GET /api/groups, POST /api/groups,
-# POST /api/groups/{group_id}/policies
+# Groups & policy — path Inh xác nhận 22/07: base "/auth/" và "/policy/"
+#
+# GET  /auth/groups/                    — danh sách nhóm
+# POST /auth/groups/                    — tạo nhóm mới
+# POST /policy/assign-user-group/       — gán user vào nhóm
+# GET  /policy/group-server/            — danh sách policy hiện có
+# POST /policy/group-server/            — tạo/gán policy mới
+#   body: {"group_id": UUID, "server_id": UUID,
+#          "max_duration_minutes": int, "require_approval": bool}
+#   *** LƯU Ý TÊN FIELD: "require_approval" (KHÔNG có "s") ***
+#   Mock hiện tại của mình (GROUP_SERVER_POLICY, main.py) đang dùng
+#   "requires_approval" (CÓ "s") — phải đổi tên field khi ghép thật, không
+#   thì backend không nhận, dễ lỗi âm thầm.
 # ---------------------------------------------------------------------------
 
 async def get_groups() -> list[dict]:
-    """TODO: GET {BASE_URL}/api/groups — trả về group kèm members (Inh đồng
-    bộ từ Keycloak) và policies (group_server_policy)."""
-    raise NotImplementedError("Chưa ghép API thật — dùng MOCK_GROUPS trong main.py")
+    """GET {BASE_URL}/auth/groups/ — danh sách nhóm."""
+    return await _request("GET", "/auth/groups/")
+
+
+async def create_group(name: str) -> dict:
+    """POST {BASE_URL}/auth/groups/
+    body: {"name": name}"""
+    return await _request("POST", "/auth/groups/", json={"name": name})
+
+
+async def assign_user_to_group(user_id: str, group_id: str) -> dict:
+    """POST {BASE_URL}/policy/assign-user-group/
+    body: {"user_id": user_id, "group_id": group_id}"""
+    return await _request(
+        "POST",
+        "/policy/assign-user-group/",
+        json={"user_id": user_id, "group_id": group_id},
+    )
+
+
+async def list_group_server_policies() -> list[dict]:
+    """GET {BASE_URL}/policy/group-server/ — toàn bộ policy hiện có."""
+    return await _request("GET", "/policy/group-server/")
 
 
 async def save_group_server_policy(
     group_id: str,
     server_id: str,
-    enabled: bool,
     max_duration_minutes: int,
-    requires_approval: bool,
+    require_approval: bool,
 ) -> dict:
-    """TODO: POST {BASE_URL}/api/groups/{group_id}/policies
-    body: {"server_id": server_id, "enabled": enabled,
+    """POST {BASE_URL}/policy/group-server/
+    body: {"group_id": group_id, "server_id": server_id,
            "max_duration_minutes": max_duration_minutes,
-           "requires_approval": requires_approval}"""
-    raise NotImplementedError("Chưa ghép API thật — dùng GROUP_SERVER_POLICY trong main.py")
+           "require_approval": require_approval}
+    Chú ý: field tên là "require_approval", không phải "requires_approval"
+    như mock cũ."""
+    return await _request(
+        "POST",
+        "/policy/group-server/",
+        json={
+            "group_id": group_id,
+            "server_id": server_id,
+            "max_duration_minutes": max_duration_minutes,
+            "require_approval": require_approval,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -173,21 +251,31 @@ async def _request(method: str, path: str, **kwargs) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# GHI CHÚ (cập nhật 22/07, sau khi Inh trả lời đầy đủ qua file d.docx):
+# GHI CHÚ (cập nhật 22/07, sau khi Inh trả lời đầy đủ qua d.docx + tin nhắn):
 #
-# ĐÃ CHỐT:
+# ĐÃ CHỐT — đủ path để ghép cả 4 màn:
 # 1. group_server_policy: Backend enforce bắt buộc (400 nếu vi phạm), UI
-#    vẫn giữ validate riêng cho UX — mô hình Defense in Depth, an toàn.
+#    vẫn giữ validate riêng cho UX — Defense in Depth, an toàn.
 # 2. Approve/reject: POST /access/requests/{request_id}/review,
 #    body {"status": "approved"|"rejected"}.
-# 3. Active Grant tách hoàn toàn khỏi Request, đúng như dự đoán ban đầu.
+# 3. Active Grant tách hoàn toàn khỏi Request.
+# 4. Servers: CRUD đủ ở base /servers/ — nhưng UI theo quyết định cũ của
+#    nhóm CHỈ dùng get_servers() + update_server(), KHÔNG gọi
+#    create_server()/delete_server() trừ khi nhóm đổi quyết định.
+# 5. Groups & policy: base /auth/ (nhóm) và /policy/ (gán user, policy).
 #
-# CÒN CẦN HỎI THÊM (chưa thấy trong file Inh gửi):
-# - Path chính xác cho GET /servers, PATCH /servers/{id} (server skill vẫn
-#   đang dùng path đoán "/api/servers" — CHƯA xác nhận với Inh).
-# - Path cho GET /groups, POST /groups/{id}/policies (quản lý
-#   group_server_policy) — cũng chưa xác nhận.
-# - revoke_grant() bên dưới Inh ghi chú 2 khả năng (DELETE hoặc POST
-#   .../revoke) — cần chốt lại 1 cái khi ghép thật, thử cái nào lỗi thì
-#   đổi qua cái kia.
+# CẦN LƯU Ý KHI GHÉP THẬT (dễ gây lỗi nếu bỏ qua):
+# - Field tên policy là "require_approval" (không có "s") — mock cũ trong
+#   main.py đang đặt tên "requires_approval" (có "s"). Không đổi tên biến
+#   trong main.py/template, CHỈ đổi tên key lúc build JSON gửi đi trong
+#   save_group_server_policy() ở trên (đã làm sẵn).
+# - Server thật có thêm field "ip" mà mock cũ không có — cần thêm ô
+#   nhập/hiển thị IP trong form Sửa server (servers.html/_servers_table.html)
+#   khi ghép thật.
+# - BASE_URL trùng port 8000 với UI — xem ghi chú ngay dưới BASE_URL ở đầu
+#   file, nhớ đổi port UI khi chạy song song để test.
+# - id thật là UUID (vd "3fa85f64-5717-4562-b3fc-2c963f66afa6"), không phải
+#   chuỗi ngắn kiểu "s-001"/"g-support" như trong mock — không ảnh hưởng
+#   code (đều là string) nhưng UI hiển thị id sẽ dài hơn, có thể cần rút
+#   gọn khi hiển thị (vd chỉ hiện 8 ký tự đầu).
 # ---------------------------------------------------------------------------

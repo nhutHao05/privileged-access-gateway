@@ -63,48 +63,100 @@ async def save_group_server_policy(
 
 
 # ---------------------------------------------------------------------------
-# Access requests (JIT flow) — ghép chung với Inh
+# Access requests (JIT flow) — field + path Inh xác nhận ngày 21-22/07:
+#
+# POST /access/requests/  (payload gửi lên)
+#   server_id (UUID), reason (string), requested_minutes (int)
+#   -- Không có group_id: Backend tự tra user_id (qua JWT sau này) -> group
+#      -> group_server_policy để enforce (400 Bad Request nếu vi phạm).
+#      UI vẫn giữ validate riêng (lọc server được phép, chặn vượt max phút)
+#      để UX tốt hơn — Inh xác nhận đây là mô hình chuẩn "Defense in
+#      Depth", 2 bên cùng check theo đúng group_server_policy, không sợ
+#      lệch nhau.
+#
+# GET /access/requests/  (mỗi item trả về)
+#   id (UUID), user_id (UUID), server_id (UUID), reason (string),
+#   requested_minutes (int),
+#   status ("pending" | "approved" | "rejected" | "expired"),
+#   created_at (datetime)
+#
+# POST /access/requests/{request_id}/review  (duyệt/từ chối)
+#   body: {"status": "approved"}  hoặc  {"status": "rejected"}
 # ---------------------------------------------------------------------------
 
 async def create_access_request(
-    group_id: str, server_id: str, reason: str, requested_minutes: int
+    server_id: str, reason: str, requested_minutes: int
 ) -> dict:
-    """TODO: POST {BASE_URL}/api/access-requests
-    body: {"group_id": group_id, "server_id": server_id, "reason": reason,
+    """POST {BASE_URL}/access/requests/
+    body: {"server_id": server_id, "reason": reason,
            "requested_minutes": requested_minutes}
-    Lưu ý: server thật có thể tự quyết định pending/approved dựa theo
-    requires_approval — không cần tính lại ở phía UI như bản mock."""
-    raise NotImplementedError("Chưa ghép API thật — dùng access_requests_db trong main.py")
+    Không truyền group_id — backend tự xác định qua user đăng nhập (JWT).
+    Trả về object với field: id, user_id, server_id, reason,
+    requested_minutes, status, created_at.
+    Backend có thể trả 400 nếu vi phạm group_server_policy — main.py cần
+    bắt lỗi này và hiển thị lại thành banner đỏ giống lỗi validate ở UI."""
+    return await _request(
+        "POST",
+        "/access/requests/",
+        json={
+            "server_id": server_id,
+            "reason": reason,
+            "requested_minutes": requested_minutes,
+        },
+    )
 
 
 async def list_access_requests(status: str | None = None) -> list[dict]:
-    """TODO: GET {BASE_URL}/api/access-requests?status={status}"""
-    raise NotImplementedError("Chưa ghép API thật — dùng access_requests_db trong main.py")
+    """GET {BASE_URL}/access/requests/?status={status}
+    Mỗi item: id, user_id, server_id, reason, requested_minutes, status,
+    created_at."""
+    params = {"status": status} if status else None
+    return await _request("GET", "/access/requests/", params=params)
 
 
-async def approve_access_request(request_id: str) -> dict:
-    """TODO: POST {BASE_URL}/api/access-requests/{request_id}/approve"""
-    raise NotImplementedError("Chưa ghép API thật — dùng access_requests_db trong main.py")
-
-
-async def reject_access_request(request_id: str) -> dict:
-    """TODO: POST {BASE_URL}/api/access-requests/{request_id}/reject"""
-    raise NotImplementedError("Chưa ghép API thật — dùng access_requests_db trong main.py")
+async def review_access_request(request_id: str, status: str) -> dict:
+    """POST {BASE_URL}/access/requests/{request_id}/review
+    body: {"status": "approved" | "rejected"}
+    Thay cho 2 hàm approve/reject riêng trước đây — Inh gộp chung 1
+    endpoint "review", truyền status tương ứng."""
+    return await _request(
+        "POST", f"/access/requests/{request_id}/review", json={"status": status}
+    )
 
 
 # ---------------------------------------------------------------------------
-# Active grants — GET /api/grants/active, DELETE /api/grants/{id}
+# Active grants — Inh xác nhận: TÁCH RIÊNG hoàn toàn khỏi request.
+#   - AccessRequest = "đơn xin" (lưu lịch sử: ai xin, khi nào, ai duyệt).
+#   - ActiveGrant   = "thẻ ra vào" thực tế, chỉ sinh ra khi request
+#     chuyển sang approved.
+#
+# GET /access/grants/  (mỗi item trả về)
+#   id (UUID, Grant ID), request_id (UUID, trỏ ngược đơn gốc),
+#   user_id (UUID), server_id (UUID),
+#   granted_at (datetime), expires_at (datetime = granted_at + requested_minutes)
+#
+# DELETE /access/grants/{grant_id}  — thu hồi khẩn cấp
+#   (Inh ghi chú: có thể là POST /access/grants/{grant_id}/revoke tùy
+#   router Inh chọn cuối cùng — cần hỏi lại lúc ghép thật nếu 2 cách đều
+#   không ăn.)
+#
+# => Khi ghép thật, main.py build màn "Quyền active" bằng list_active_grants()
+#    trực tiếp (KHÔNG lọc access_requests_db theo status=="approved" như
+#    bản mock hiện tại) — join server_id với get_servers() để lấy tên/tag
+#    hiển thị, dùng expires_at để tính đồng hồ đếm ngược.
 # ---------------------------------------------------------------------------
 
 async def list_active_grants() -> list[dict]:
-    """TODO: GET {BASE_URL}/api/grants/active"""
-    raise NotImplementedError("Chưa ghép API thật — dùng access_requests_db trong main.py")
+    """GET {BASE_URL}/access/grants/
+    Mỗi item: id, request_id, user_id, server_id, granted_at, expires_at."""
+    return await _request("GET", "/access/grants/")
 
 
 async def revoke_grant(grant_id: str, reason: str = "") -> None:
-    """TODO: DELETE {BASE_URL}/api/grants/{grant_id}
-    body: {"revoke_reason": reason} nếu API yêu cầu."""
-    raise NotImplementedError("Chưa ghép API thật — dùng access_requests_db trong main.py")
+    """DELETE {BASE_URL}/access/grants/{grant_id}
+    Nếu Inh dùng router khác, đổi thành:
+    POST {BASE_URL}/access/grants/{grant_id}/revoke"""
+    await _request("DELETE", f"/access/grants/{grant_id}", json={"reason": reason} if reason else None)
 
 
 # ---------------------------------------------------------------------------
@@ -118,3 +170,24 @@ async def _request(method: str, path: str, **kwargs) -> dict:
         response = await client.request(method, path, **kwargs)
         response.raise_for_status()
         return response.json()
+
+
+# ---------------------------------------------------------------------------
+# GHI CHÚ (cập nhật 22/07, sau khi Inh trả lời đầy đủ qua file d.docx):
+#
+# ĐÃ CHỐT:
+# 1. group_server_policy: Backend enforce bắt buộc (400 nếu vi phạm), UI
+#    vẫn giữ validate riêng cho UX — mô hình Defense in Depth, an toàn.
+# 2. Approve/reject: POST /access/requests/{request_id}/review,
+#    body {"status": "approved"|"rejected"}.
+# 3. Active Grant tách hoàn toàn khỏi Request, đúng như dự đoán ban đầu.
+#
+# CÒN CẦN HỎI THÊM (chưa thấy trong file Inh gửi):
+# - Path chính xác cho GET /servers, PATCH /servers/{id} (server skill vẫn
+#   đang dùng path đoán "/api/servers" — CHƯA xác nhận với Inh).
+# - Path cho GET /groups, POST /groups/{id}/policies (quản lý
+#   group_server_policy) — cũng chưa xác nhận.
+# - revoke_grant() bên dưới Inh ghi chú 2 khả năng (DELETE hoặc POST
+#   .../revoke) — cần chốt lại 1 cái khi ghép thật, thử cái nào lỗi thì
+#   đổi qua cái kia.
+# ---------------------------------------------------------------------------

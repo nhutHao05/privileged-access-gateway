@@ -160,8 +160,8 @@ async def save_group_server_policy(
     payload = {
         "group_id": group_id,
         "server_id": server_id,
-        # "max_duration_minutes": max_duration_minutes,
-        # "require_approval": require_approval,
+        "max_duration_minutes": max_duration_minutes,
+        "require_approval": require_approval,
     }
     return await _request("POST", "/policy/group-server/", json=payload)
 

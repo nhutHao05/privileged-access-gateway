@@ -21,7 +21,7 @@
             <td>
                 <span class="badge badge-{{ r.status }}">{{ r.status }}</span>
             </td>
-            <td>{{ r.requested_at.strftime("%H:%M %d/%m") }}</td>
+            <td>{{ r.requested_at.strftime("%H:%M %d/%m") if r.requested_at else "—" }}</td>
             <td>
                 {% if r.status == "pending" %}
                 <button

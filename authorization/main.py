@@ -1,461 +1,474 @@
 """
 PAM Gateway — Authorization & UI module
-Màn "Xin quyền" (access request) + màn "Quản lý server" (chỉ Sửa tên/tag)
-— bản demo dùng MOCK DATA (chưa nối API thật của Inh)
 
-Chạy thử:
-    uvicorn main:app --reload
-Rồi mở trình duyệt: http://127.0.0.1:8000
+Bản chuẩn giữ nguyên biến `ip` khớp với Control Plane Backend của Inh.
 """
 
-import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
+import httpx
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+import api_client
+
 app = FastAPI(title="PAM Gateway - Authorization & UI")
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    print("=== 422 VALIDATION ERROR ===")
+    print(exc.errors())
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
 # ---------------------------------------------------------------------------
-# MOCK DATA — sau này thay bằng gọi API thật của Inh (GET /api/servers,
-# POST /api/access-requests, PATCH /api/servers/{id} ...). Cấu trúc field
-# đặt đúng snake_case như đã chốt trong RBAC-API-Spec-Draft để lúc thay
-# API thật không phải sửa template.
-#
-# LƯU Ý: server do Inh import từ Guacamole — UI ở đây chỉ được SỬA
-# (tên, tag), KHÔNG được Thêm/Xóa. Không có route nào thêm hoặc xóa
-# server trong file này.
+# Helper
 # ---------------------------------------------------------------------------
 
-MOCK_SERVERS = [
-    {"id": "s-001", "name": "db-prod-01", "tags": ["prod", "db"]},
-    {"id": "s-002", "name": "web-app-02", "tags": ["prod", "web"]},
-    {"id": "s-003", "name": "staging-app-01", "tags": ["staging"]},
-]
-
-# Nhóm + thành viên — thực tế sẽ do Inh đồng bộ định kỳ từ Keycloak vào DB
-# (đã chốt: UI KHÔNG gọi Keycloak trực tiếp, không có route Thêm/Xóa thành
-# viên ở đây). Danh sách members chỉ để hiển thị.
-MOCK_GROUPS = [
-    {"id": "g-admin", "name": "Admin", "members": ["Hào", "Vinh"]},
-    {"id": "g-support", "name": "Support", "members": ["Inh"]},
-    {"id": "g-dev", "name": "Dev", "members": ["Nghĩa", "Sang"]},
-]
-
-# group_server_policy — đúng theo bảng trong RBAC-API-Spec-Draft.docx:
-# nhóm nào được PHÉP xin quyền vào server nào, tối đa bao nhiêu phút, có
-# cần duyệt hay không. Đây là chính sách của PAM Control Plane (không đồng
-# bộ từ Keycloak) nên UI (mình) được sửa trực tiếp — tương ứng
-# POST /api/groups/{group_id}/policies trong spec.
-#
-# key: group_id -> { server_id: {"max_duration_minutes": int, "requires_approval": bool} }
-# Nếu server_id không có trong dict con của group -> nhóm đó KHÔNG được
-# phép xin quyền vào server đó.
-GROUP_SERVER_POLICY: dict[str, dict[str, dict]] = {
-    "g-admin": {
-        "s-001": {"max_duration_minutes": 120, "requires_approval": True},
-        "s-002": {"max_duration_minutes": 120, "requires_approval": True},
-        "s-003": {"max_duration_minutes": 120, "requires_approval": False},
-    },
-    "g-support": {
-        "s-002": {"max_duration_minutes": 60, "requires_approval": True},
-    },
-    "g-dev": {
-        "s-003": {"max_duration_minutes": 90, "requires_approval": False},
-    },
-}
-
-# "DB" giả trong RAM — mất dữ liệu khi restart server, chỉ để demo UI
-access_requests_db: list[dict] = []
+def _error_message(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        try:
+            detail = exc.response.json().get("detail", exc.response.text)
+        except Exception:
+            detail = exc.response.text
+        return f"Lỗi Control Plane ({status}): {detail}"
+    if isinstance(exc, httpx.RequestError):
+        return f"Không thể kết nối Control Plane: {exc}"
+    return str(exc)
 
 
-def find_server(server_id: str) -> dict | None:
-    return next((s for s in MOCK_SERVERS if s["id"] == server_id), None)
-
-
-def find_group(group_id: str) -> dict | None:
-    return next((g for g in MOCK_GROUPS if g["id"] == group_id), None)
-
-
-def get_policy(group_id: str, server_id: str) -> dict | None:
-    """Trả về policy (max_duration_minutes, requires_approval) của 1 nhóm với
-    1 server, hoặc None nếu nhóm đó không được phép xin quyền vào server này."""
-    return GROUP_SERVER_POLICY.get(group_id, {}).get(server_id)
-
-
-def allowed_servers_for_group(group_id: str) -> list[dict]:
-    """
-    Danh sách server mà nhóm này ĐƯỢC PHÉP xin quyền, kèm theo policy
-    (max_duration_minutes, requires_approval) để hiển thị gợi ý trên form.
-    Đây chính là chỗ áp dụng group_server_policy — trước đây form "Xin
-    quyền" bỏ qua bảng này, cho chọn bừa server nào cũng được.
-    """
+def build_group_matrix(groups: list[dict], servers: list[dict], policies: list[dict]) -> list[dict]:
+    policy_map = {(p["group_id"], p["server_id"]): p for p in policies}
     result = []
-    for s in MOCK_SERVERS:
-        policy = get_policy(group_id, s["id"])
-        if policy is not None:
-            result.append({**s, "policy": policy})
+    for g in groups:
+        server_policies = []
+        for s in servers:
+            pol = policy_map.get((g["id"], s["id"]))
+            if pol is not None:
+                server_policies.append({
+                    "server_id": s["id"],
+                    "server_name": s["name"],
+                    "enabled": True,
+                    "max_duration_minutes": pol.get("max_duration_minutes", 60),
+                    "require_approval": pol.get("require_approval", True),
+                })
+            else:
+                server_policies.append({
+                    "server_id": s["id"],
+                    "server_name": s["name"],
+                    "enabled": False,
+                    "max_duration_minutes": 60,
+                    "require_approval": True,
+                })
+        result.append({
+            "id": g["id"],
+            "name": g["name"],
+            "server_policies": server_policies,
+        })
     return result
 
 
-def build_groups_view() -> list[dict]:
-    """Ghép mỗi nhóm với dict chính sách (server_id -> policy) của nó."""
-    return [
-        {**g, "policies": GROUP_SERVER_POLICY.get(g["id"], {})}
-        for g in MOCK_GROUPS
-    ]
-
-
-def compute_grant_status(r: dict) -> tuple[str | None, str | None]:
-    """
-    Tính trạng thái hiện tại của 1 request đã từng được duyệt (có expires_at).
-
-    Trả về (status, remaining_text):
-    - status: "active" (còn hiệu lực) | "expired" (đã hết giờ, scheduler thật
-      của Inh sẽ tự thu hồi) | "revoked" (bị thu hồi tay qua nút demo) | None
-      (request này chưa từng được duyệt, không có expires_at -> bỏ qua)
-    - remaining_text: chuỗi hiển thị thời gian còn lại, chỉ có khi status
-      là "active".
-    """
-    if r.get("status") == "revoked":
-        return "revoked", None
-
-    expires_at = r.get("expires_at")
-    if not expires_at:
-        return None, None
-
-    now = datetime.now()
-    if expires_at > now:
-        remaining = expires_at - now
-        total_seconds = int(remaining.total_seconds())
-        minutes, seconds = divmod(total_seconds, 60)
-        return "active", f"{minutes} phút {seconds} giây"
-
-    return "expired", None
+def get_policy(policies: list[dict], group_id: str, server_id: str) -> dict | None:
+    for p in policies:
+        if p["group_id"] == group_id and p["server_id"] == server_id:
+            return p
+    return None
 
 
 # ---------------------------------------------------------------------------
-# Routes — Xin quyền (access requests)
+# Tab 1: Xin quyền (Request Access)
 # ---------------------------------------------------------------------------
+
+def find_group(groups: list[dict], group_id: str) -> dict | None:
+    return next((g for g in groups if g["id"] == group_id), None)
+
+
+def allowed_servers_for_group(servers: list[dict], policies: list[dict], group_id: str) -> list[dict]:
+    result = []
+    for s in servers:
+        pol = get_policy(policies, group_id, s["id"])
+        if pol is not None:
+            result.append({**s, "policy": pol})
+    return result
+
+
+def _parse_dt(value):
+    dt = None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if dt is not None and dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def attach_request_display(r: dict, servers: list[dict]) -> dict:
+    server = next((s for s in servers if s["id"] == r.get("server_id")), None)
+    return {
+        **r,
+        "server": server,
+        "requested_minutes": r.get("requested_minutes") or r.get("duration_minutes") or 0,
+        "requested_at": _parse_dt(r.get("created_at") or r.get("requested_at")),
+    }
+
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request, group_id: str = MOCK_GROUPS[0]["id"]):
-    """
-    Trang chính: form xin quyền + bảng 'Yêu cầu của tôi'.
+async def request_access_page(request: Request, group_id: str | None = None):
+    load_error = None
+    groups, servers, policies, requests_raw = [], [], [], []
+    try:
+        groups = await api_client.get_groups()
+        servers = await api_client.get_servers()
+        policies = await api_client.list_group_server_policies()
+        requests_raw = await api_client.list_access_requests()
+    except Exception as exc:
+        load_error = _error_message(exc)
 
-    LƯU Ý TẠM THỜI: chưa có đăng nhập thật (Vinh + Inh chưa xong JWT
-    Keycloak), nên mình cho "đóng vai" 1 nhóm qua dropdown ở đầu trang
-    (query param ?group_id=...) để có thể demo & test validation theo
-    group_server_policy. Sau khi có JWT thật, group_id nên lấy từ user
-    đang đăng nhập (thuộc nhóm nào) thay vì cho tự chọn như thế này —
-    chỗ này chỉ cần thay input lấy group_id, phần validate bên dưới giữ
-    nguyên.
-    """
-    selected_group = find_group(group_id) or MOCK_GROUPS[0]
+    selected_group = find_group(groups, group_id) if group_id else None
+    if selected_group is None and groups:
+        selected_group = groups[0]
+
+    allowed_servers = (
+        allowed_servers_for_group(servers, policies, selected_group["id"])
+        if selected_group else []
+    )
+    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "groups": MOCK_GROUPS,
-            "selected_group_id": selected_group["id"],
-            "allowed_servers": allowed_servers_for_group(selected_group["id"]),
-            "access_requests": list(reversed(access_requests_db)),
+            "groups": groups,
+            "selected_group_id": selected_group["id"] if selected_group else None,
+            "allowed_servers": allowed_servers,
+            "access_requests": access_requests,
+            "load_error": load_error,
         },
     )
 
 
 @app.post("/access-requests", response_class=HTMLResponse)
-def create_access_request(
+async def submit_access_request(
     request: Request,
     group_id: str = Form(...),
     server_id: str = Form(...),
     reason: str = Form(...),
-    requested_minutes: int = Form(...),
+    requested_minutes: int = Form(60),
 ):
-    """
-    Tương ứng POST /api/access-requests trong spec.
-    HTMX gọi vào đây, nhận về đúng fragment HTML của bảng để swap vào trang
-    (không reload cả trang).
-
-    Validate theo group_server_policy trước khi tạo request:
-    - Nhóm phải được phép xin quyền vào server đó (có policy).
-    - requested_minutes không được vượt max_duration_minutes của policy.
-    Nếu policy.requires_approval = False -> tự động approve luôn, không
-    cần chờ duyệt tay (đúng theo spec, trước đây bản cũ luôn để "pending").
-    """
-    reason = reason.strip()
-    policy = get_policy(group_id, server_id)
     error = None
-
-    if policy is None:
-        error = "Nhóm của bạn không được phép xin quyền vào server này."
-    elif not reason:
-        error = "Vui lòng nhập lý do xin quyền."
-    elif requested_minutes <= 0:
-        error = "Thời lượng phải lớn hơn 0 phút."
-    elif requested_minutes > policy["max_duration_minutes"]:
-        error = (
-            f"Thời lượng vượt quá mức tối đa nhóm bạn được phép "
-            f"({policy['max_duration_minutes']} phút)."
+    success = None
+    try:
+        await api_client.create_access_request(
+            group_id=group_id,
+            server_id=server_id,
+            reason=reason,
+            duration_minutes=requested_minutes,
         )
+        success = "Đã gửi yêu cầu xin quyền."
+    except Exception as exc:
+        error = _error_message(exc)
 
-    if error:
-        return templates.TemplateResponse(
-            request,
-            "_request_response.html",
-            {"access_requests": list(reversed(access_requests_db)), "error": error},
-        )
+    servers = await api_client.get_servers()
+    requests_raw = await api_client.list_access_requests()
+    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
 
-    server = find_server(server_id)
-    auto_approved = not policy["requires_approval"]
-    now = datetime.now()
-
-    new_request = {
-        "id": str(uuid.uuid4())[:8],
-        "server": server,
-        "reason": reason,
-        "requested_minutes": requested_minutes,
-        "status": "approved" if auto_approved else "pending",
-        "requested_at": now,
-    }
-    if auto_approved:
-        new_request["expires_at"] = now + timedelta(minutes=requested_minutes)
-    access_requests_db.append(new_request)
-
-    success = "Đã tạo yêu cầu và tự động cấp quyền." if auto_approved else None
     return templates.TemplateResponse(
         request,
         "_request_response.html",
+        {"error": error, "success": success, "access_requests": access_requests},
+    )
+
+
+@app.post("/access-requests/{request_id}/approve", response_class=HTMLResponse)
+async def approve_request_from_index(request: Request, request_id: str):
+    error = None
+    try:
+        await api_client.review_access_request(request_id, status="approved")
+    except Exception as exc:
+        error = _error_message(exc)
+
+    servers = await api_client.get_servers()
+    requests_raw = await api_client.list_access_requests()
+    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+
+    return templates.TemplateResponse(
+        request,
+        "_request_response.html",
+        {"error": error, "success": None if error else "Đã duyệt yêu cầu.", "access_requests": access_requests},
+    )
+
+
+@app.post("/access-requests/{request_id}/reject", response_class=HTMLResponse)
+async def reject_request_from_index(request: Request, request_id: str):
+    error = None
+    try:
+        await api_client.review_access_request(request_id, status="rejected")
+    except Exception as exc:
+        error = _error_message(exc)
+
+    servers = await api_client.get_servers()
+    requests_raw = await api_client.list_access_requests()
+    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+
+    return templates.TemplateResponse(
+        request,
+        "_request_response.html",
+        {"error": error, "success": None if error else "Đã từ chối yêu cầu.", "access_requests": access_requests},
+    )
+# ---------------------------------------------------------------------------
+# Tab 2: Quản lý server (Server Management — chỉ Edit)
+# ---------------------------------------------------------------------------
+
+@app.get("/servers", response_class=HTMLResponse)
+async def servers_page(request: Request):
+    error = None
+    servers = []
+    try:
+        servers = await api_client.get_servers()
+    except Exception as exc:
+        error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "servers.html",
+        {"servers": servers, "editing_id": None, "error": error},
+    )
+
+
+@app.get("/servers/table", response_class=HTMLResponse)
+async def servers_table_partial(request: Request):
+    error = None
+    servers = []
+    try:
+        servers = await api_client.get_servers()
+    except Exception as exc:
+        error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "_servers_table.html",
+        {"servers": servers, "editing_id": None, "error": error},
+    )
+
+
+@app.get("/servers/{server_id}/edit-row", response_class=HTMLResponse)
+async def edit_server_row(request: Request, server_id: str):
+    error = None
+    servers = []
+    try:
+        servers = await api_client.get_servers()
+    except Exception as exc:
+        error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "_servers_table.html",
+        {"servers": servers, "editing_id": server_id, "error": error},
+    )
+
+
+@app.post("/servers/{server_id}/edit", response_class=HTMLResponse)
+async def edit_server(
+    request: Request,
+    server_id: str,
+    name: str = Form(None),
+    ip: str = Form(None),
+    tags: str = Form(None),
+):
+    error = None
+    success = None
+    tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+    try:
+        await api_client.update_server(server_id, name=name, ip=ip, tags=tags_list)
+        success = "Cập nhật server thành công!"
+    except Exception as exc:
+        error = _error_message(exc)
+
+    servers = await api_client.get_servers()
+
+    return templates.TemplateResponse(
+        request,
+        "_servers_table.html",
         {
-            "access_requests": list(reversed(access_requests_db)),
+            "servers": servers,
+            "editing_id": None,
+            "error": error,
             "success": success,
         },
     )
 
 
-@app.post("/access-requests/{request_id}/approve", response_class=HTMLResponse)
-def approve_request(request: Request, request_id: str):
-    """Tương ứng POST /api/access-requests/{id}/approve — demo duyệt tay."""
-    for r in access_requests_db:
-        if r["id"] == request_id:
-            r["status"] = "approved"
-            r["expires_at"] = datetime.now() + timedelta(minutes=r["requested_minutes"])
-    return templates.TemplateResponse(
-        request,
-        "_request_response.html",
-        {"access_requests": list(reversed(access_requests_db))},
-    )
-
-
-@app.post("/access-requests/{request_id}/reject", response_class=HTMLResponse)
-def reject_request(request: Request, request_id: str):
-    """Tương ứng POST /api/access-requests/{id}/reject."""
-    for r in access_requests_db:
-        if r["id"] == request_id:
-            r["status"] = "rejected"
-    return templates.TemplateResponse(
-        request,
-        "_request_response.html",
-        {"access_requests": list(reversed(access_requests_db))},
-    )
-
-
 # ---------------------------------------------------------------------------
-# Routes — Quản lý server (CHỈ Sửa tên/tag — không Thêm, không Xóa)
+# Tab 3: Quyền đang active (Active Grants)
 # ---------------------------------------------------------------------------
 
-@app.get("/servers", response_class=HTMLResponse)
-def servers_page(request: Request):
-    """Trang quản lý server: bảng danh sách server, có thể Sửa từng dòng."""
-    return templates.TemplateResponse(
-        request,
-        "servers.html",
-        {"servers": MOCK_SERVERS, "editing_id": None},
-    )
+def _remaining_text(expires_at) -> str:
+    if not expires_at:
+        return ""
+    now = datetime.now(timezone.utc)
+    total_seconds = int((expires_at - now).total_seconds())
+    if total_seconds <= 0:
+        return "Hết hạn"
+    minutes = total_seconds // 60
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} giờ {minutes} phút" if hours else f"{minutes} phút"
 
 
-@app.get("/servers/table", response_class=HTMLResponse)
-def servers_table(request: Request):
-    """
-    Trả về fragment bảng server ở chế độ xem thường (không có dòng nào
-    đang sửa). Dùng khi bấm nút 'Hủy' để thoát chế độ sửa.
-    """
-    return templates.TemplateResponse(
-        request,
-        "_servers_table.html",
-        {"servers": MOCK_SERVERS, "editing_id": None},
-    )
+def attach_grant_display(g: dict, servers: list[dict], requests_raw: list[dict]) -> dict:
+    server = next((s for s in servers if s["id"] == g.get("server_id")), None)
+    expires_at = _parse_dt(g.get("expires_at"))
+    status = "active" if (expires_at is None or expires_at > datetime.now(timezone.utc)) else "expired"
+    req = next((r for r in requests_raw if r.get("id") == g.get("request_id")), None)
+    reason = (req or {}).get("reason") or g.get("reason") or "—"
+    return {
+        **g,
+        "server": server,
+        "reason": reason,
+        "grant_status": status,
+        "remaining_text": _remaining_text(expires_at) if status == "active" else "",
+    }
 
 
-@app.get("/servers/{server_id}/edit-row", response_class=HTMLResponse)
-def edit_server_row(request: Request, server_id: str):
-    """
-    Bấm nút 'Sửa' ở 1 dòng -> trả lại cả bảng, nhưng dòng có server_id này
-    hiển thị dạng ô nhập (input) thay vì chữ thường.
-    """
-    return templates.TemplateResponse(
-        request,
-        "_servers_table.html",
-        {"servers": MOCK_SERVERS, "editing_id": server_id},
-    )
-
-
-@app.post("/servers/{server_id}/edit", response_class=HTMLResponse)
-def save_server_edit(
-    request: Request,
-    server_id: str,
-    name: str = Form(""),
-    tags: str = Form(""),
-):
-    """
-    Tương ứng PATCH /api/servers/{id} trong spec (khi Inh có API thật,
-    chỗ này chỉ cần thay đoạn cập nhật MOCK_SERVERS bằng lệnh gọi API).
-
-    - name: tên server, không được để trống.
-    - tags: chuỗi các tag cách nhau bởi dấu phẩy, ví dụ "prod, db".
-    """
-    server = find_server(server_id)
-    clean_name = name.strip()
-
-    if server is None:
-        error = "Không tìm thấy server này (có thể đã bị Inh xóa/đổi bên Guacamole)."
-    elif not clean_name:
-        error = "Tên server không được để trống."
-    else:
-        error = None
-
-    if error:
-        # Giữ nguyên dòng đang ở chế độ sửa để người dùng sửa lại, kèm banner lỗi.
-        return templates.TemplateResponse(
-            request,
-            "_servers_table.html",
-            {"servers": MOCK_SERVERS, "editing_id": server_id, "error": error},
-        )
-
-    server["name"] = clean_name
-    server["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
-
-    return templates.TemplateResponse(
-        request,
-        "_servers_table.html",
-        {"servers": MOCK_SERVERS, "editing_id": None, "success": "Đã lưu thay đổi."},
-    )
-
-
-# ---------------------------------------------------------------------------
-# Routes — Quyền đang active (theo Sprint 2 trong kế hoạch: "UI xin quyền /
-# duyệt / xem quyền đang active"). Sau này khi Inh xong scheduler thật, việc
-# tự động chuyển "active" -> "expired" sẽ do backend thật làm; nút "Thu hồi
-# ngay" ở đây chỉ là demo tạm, không thay thế scheduler.
-# ---------------------------------------------------------------------------
-
-def build_active_grants() -> list[dict]:
-    """Lọc ra các request đã từng được duyệt, kèm trạng thái/thời gian còn lại."""
-    grants = []
-    for r in access_requests_db:
-        status, remaining_text = compute_grant_status(r)
-        if status is None:
-            continue  # request này chưa từng được duyệt -> bỏ qua
-        grants.append({**r, "grant_status": status, "remaining_text": remaining_text})
-
-    # Sắp xếp: active lên trước, rồi tới expired/revoked
-    order = {"active": 0, "expired": 1, "revoked": 1}
-    grants.sort(key=lambda g: order.get(g["grant_status"], 2))
-    return grants
+async def _load_grants_display() -> list[dict]:
+    grants = await api_client.list_active_grants()
+    servers = await api_client.get_servers()
+    requests_raw = await api_client.list_access_requests()
+    return [attach_grant_display(g, servers, requests_raw) for g in grants]
 
 
 @app.get("/active-grants", response_class=HTMLResponse)
-def active_grants_page(request: Request):
-    """Trang xem các quyền đã duyệt: còn hiệu lực bao lâu, đã hết hạn chưa."""
+async def active_grants_page(request: Request):
+    error = None
+    grants_display = []
+    try:
+        grants_display = await _load_grants_display()
+    except Exception as exc:
+        error = _error_message(exc)
+        print(f"=== [DEBUG active-grants] === {error}")
+
     return templates.TemplateResponse(
-        request,
-        "active_grants.html",
-        {"grants": build_active_grants()},
+        request, "active_grants.html", {"grants": grants_display, "error": error},
     )
 
 
 @app.get("/active-grants/table", response_class=HTMLResponse)
-def active_grants_table(request: Request):
-    """
-    Fragment bảng, được gọi lại tự động mỗi vài giây (HTMX polling) để
-    đồng hồ đếm ngược tự cập nhật mà không cần reload cả trang.
-    """
+async def active_grants_table_partial(request: Request):
+    error = None
+    grants_display = []
+    try:
+        grants_display = await _load_grants_display()
+    except Exception as exc:
+        error = _error_message(exc)
+
     return templates.TemplateResponse(
-        request,
-        "_active_grants_table.html",
-        {"grants": build_active_grants()},
+        request, "_active_grants_table.html", {"grants": grants_display, "error": error},
     )
 
 
-@app.post("/active-grants/{request_id}/revoke", response_class=HTMLResponse)
-def revoke_grant(request: Request, request_id: str):
-    """
-    Demo 'Thu hồi ngay' — sau này khi có API thật của Inh, chỗ này gọi
-    API thu hồi quyền trên Guacamole thay vì chỉ đổi status trong mock data.
-    """
-    for r in access_requests_db:
-        if r["id"] == request_id:
-            r["status"] = "revoked"
-    return templates.TemplateResponse(
-        request,
-        "_active_grants_table.html",
-        {"grants": build_active_grants()},
-    )
+@app.post("/active-grants/{grant_id}/revoke", response_class=HTMLResponse)
+async def revoke_grant_route(request: Request, grant_id: str):
+    error = None
+    try:
+        await api_client.revoke_grant(grant_id)
+    except Exception as exc:
+        error = _error_message(exc)
 
+    grants_display = []
+    try:
+        grants_display = await _load_grants_display()
+    except Exception as exc2:
+        error = error or _error_message(exc2)
+
+    return templates.TemplateResponse(
+        request, "_active_grants_table.html", {"grants": grants_display, "error": error},
+    )
 
 # ---------------------------------------------------------------------------
-# Routes — Nhóm & phân quyền (RBAC). Thành viên chỉ XEM (do Inh đồng bộ từ
-# Keycloak). Chính sách "nhóm nào được vào server nào, tối đa bao lâu, có
-# cần duyệt không" (group_server_policy) thì UI được chỉnh trực tiếp —
-# đúng theo POST /api/groups/{group_id}/policies trong RBAC-API-Spec-Draft.
+# Tab 4: Nhóm & phân quyền (Group-Server Policy Matrix)
 # ---------------------------------------------------------------------------
 
 @app.get("/groups", response_class=HTMLResponse)
-def groups_page(request: Request):
-    """Trang Nhóm & phân quyền."""
+async def groups_page(request: Request):
+    error = None
+    group_matrix = []
+    try:
+        groups = await api_client.get_groups()
+        servers = await api_client.get_servers()
+        policies = await api_client.list_group_server_policies()
+        group_matrix = build_group_matrix(groups, servers, policies)
+    except Exception as exc:
+        error = _error_message(exc)
+
     return templates.TemplateResponse(
         request,
         "groups.html",
-        {"groups": build_groups_view(), "servers": MOCK_SERVERS},
+        {
+            "groups": group_matrix,
+            "error": error,
+            "success": None,
+        },
     )
 
 
 @app.post("/groups/{group_id}/servers/{server_id}/policy", response_class=HTMLResponse)
-def save_group_server_policy(
+async def save_group_server_policy(
     request: Request,
     group_id: str,
     server_id: str,
-    enabled: str | None = Form(None),
-    max_duration_minutes: int = Form(60),
-    requires_approval: str | None = Form(None),
+    enabled: str = Form(None),
+    max_duration_minutes: str = Form("60"),
+    requires_approval: str = Form(None),
 ):
-    """
-    Tương ứng POST /api/groups/{group_id}/policies trong spec (khi Inh có
-    API thật, chỗ này chỉ cần thay đoạn cập nhật GROUP_SERVER_POLICY bằng
-    lệnh gọi API — request/response body giữ nguyên cấu trúc).
+    error = None
+    success = None
+    
+    try:
+        duration_int = int(max_duration_minutes) if max_duration_minutes.strip() else 60
+    except ValueError:
+        duration_int = 60
 
-    - enabled: checkbox "Được phép" có tick hay không. Bỏ tick -> xóa
-      chính sách (nhóm không còn được xin quyền vào server này nữa).
-    - max_duration_minutes: thời lượng JIT tối đa nhóm được xin.
-    - requires_approval: có cần admin duyệt hay tự động cấp.
-    """
-    group_policies = GROUP_SERVER_POLICY.setdefault(group_id, {})
+    try:
+        if enabled == "on":
+            await api_client.save_group_server_policy(
+                group_id=group_id,
+                server_id=server_id,
+                max_duration_minutes=duration_int,
+                require_approval=requires_approval == "on",
+            )
+            success = "Đã lưu chính sách thành công!" 
+        else:
+            policies = await api_client.list_group_server_policies()
+            existing = get_policy(policies, group_id, server_id)
+            if existing is not None:
+                await api_client.delete_group_server_policy(existing["id"])
+            success = "Đã thu hồi quyền của nhóm này."
+    except Exception as exc:
+        error = _error_message(exc)
+        print(f"=== [DEBUG LỖI TỪ INH] === : {error}")
 
-    if enabled == "on":
-        group_policies[server_id] = {
-            "max_duration_minutes": max_duration_minutes,
-            "requires_approval": requires_approval == "on",
-        }
-    else:
-        group_policies.pop(server_id, None)
-
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+    
     return templates.TemplateResponse(
         request,
         "_groups_table.html",
-        {"groups": build_groups_view(), "servers": MOCK_SERVERS},
+        {
+            "groups": build_group_matrix(groups, servers, policies),
+            "error": error,
+            "success": success,
+        },
     )

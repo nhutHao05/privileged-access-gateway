@@ -22,6 +22,10 @@
         <section class="card">
             <h2>Xin quyền mới</h2>
 
+            {% if load_error %}
+            <div class="alert alert-error">{{ load_error }}</div>
+            {% endif %}
+
             {#
               CHƯA có đăng nhập thật (chờ Vinh + Inh xong JWT Keycloak), nên
               cho "đóng vai" 1 nhóm bằng dropdown này để demo/test validation
@@ -60,7 +64,7 @@
                         {% for s in allowed_servers %}
                         <option value="{{ s.id }}">
                             {{ s.name }} ({{ ", ".join(s.tags) }}) — tối đa {{ s.policy.max_duration_minutes }} phút
-                            {% if not s.policy.requires_approval %}, tự động cấp{% endif %}
+                            {% if not s.policy.require_approval %}, tự động cấp{% endif %}
                         </option>
                         {% endfor %}
                     </select>

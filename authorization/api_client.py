@@ -1,281 +1,281 @@
 """
-api_client.py — khung gọi API thật của Inh (Control Plane, FastAPI + Postgres).
-
-CÁCH DÙNG SAU NÀY:
-Khi Inh xong API, đổi USE_MOCK = False bên dưới, rồi điền phần TODO trong
-từng hàm (gọi httpx tới BASE_URL, đúng path/method như trong
-RBAC-API-Spec-Draft.docx). main.py sẽ gọi các hàm trong file này thay vì
-thao tác trực tiếp lên MOCK_SERVERS / GROUP_SERVER_POLICY /
-access_requests_db — nghĩa là lúc đó KHÔNG cần sửa route hay template,
-chỉ sửa file này.
-
-Toàn bộ hàm ở đây trả về đúng cấu trúc dict/list mà template đang dùng
-(snake_case, đúng field như đã chốt) để cắm thẳng vào main.py.
-
-Chưa dùng file này ở đâu cả — main.py hiện tại vẫn dùng mock data trong
-RAM. Đây là bước chuẩn bị trước.
+api_client.py — cầu nối tới API thật của Inh (Control Plane, FastAPI + Postgres).
 """
+
+import uuid
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
-BASE_URL = "http://127.0.0.1:8000"  # URL Control Plane của Inh (theo Swagger: 127.0.0.1:8000/docs)
-# *** LƯU Ý: TRÙNG PORT với UI của mình! ***
-# uvicorn main:app (app của Nghĩa) mặc định cũng chạy ở port 8000. Nếu
-# chạy cả 2 cùng lúc trên 1 máy để test ghép API thật, sẽ bị đá port. Khi
-# đó chạy UI ở port khác, ví dụ:  uvicorn main:app --reload --port 8001
-# rồi vào http://127.0.0.1:8001 để test (giữ BASE_URL ở trên trỏ đúng
-# 127.0.0.1:8000 là Control Plane của Inh).
-USE_MOCK = True  # TODO: đổi thành False khi bắt đầu ghép API thật
+BASE_URL = "http://100.115.241.108:8000"  # URL Control Plane của Inh
+USE_MOCK = False  # Đang gọi API thật qua Tailscale
 
 
 # ---------------------------------------------------------------------------
-# Servers — path Inh xác nhận 22/07: base "/servers/"
-# Lưu ý: server thật có thêm field "ip" (mock hiện tại của mình chỉ có
-# name + tags, CHƯA có ip — cần bổ sung khi ghép). Backend hỗ trợ đủ CRUD
-# (tạo/xóa được), dù trước đó nhóm chốt UI chỉ cho Sửa — cần hỏi lại
-# leader/Inh xem UI có nên mở thêm nút Thêm/Xóa hay giữ nguyên quyết định
-# cũ, chỉ dùng get_servers/update_server bên dưới.
+# DỮ LIỆU MOCK — chỉ dùng khi USE_MOCK = True.
+# ---------------------------------------------------------------------------
+
+_MOCK_SERVERS: list[dict] = [
+    {"id": "s-001", "name": "db-prod-01", "ip": "10.0.1.11", "tags": ["prod", "db"]},
+    {"id": "s-002", "name": "web-app-02", "ip": "10.0.1.22", "tags": ["prod", "web"]},
+    {"id": "s-003", "name": "staging-app-01", "ip": "10.0.2.10", "tags": ["staging"]},
+]
+
+_MOCK_GROUPS: list[dict] = [
+    {"id": "g-admin", "name": "Admin"},
+    {"id": "g-support", "name": "Support"},
+    {"id": "g-dev", "name": "Dev"},
+]
+
+_MOCK_POLICIES: list[dict] = [
+    {"id": "p-001", "group_id": "g-admin", "server_id": "s-001", "max_duration_minutes": 120, "require_approval": False},
+    {"id": "p-002", "group_id": "g-admin", "server_id": "s-002", "max_duration_minutes": 120, "require_approval": False},
+    {"id": "p-003", "group_id": "g-support", "server_id": "s-002", "max_duration_minutes": 60, "require_approval": True},
+]
+
+_MOCK_REQUESTS: list[dict] = [
+    {
+        "id": "req-101",
+        "group_id": "g-support",
+        "server_id": "s-002",
+        "user_email": "user1@example.com",
+        "reason": "Cần fix bug gấp trên web-app-02",
+        "duration_minutes": 60,
+        "status": "pending",
+        "created_at": "2026-07-22T08:00:00Z",
+    }
+]
+
+_MOCK_GRANTS: list[dict] = [
+    {
+        "id": "g-901",
+        "user_email": "admin@example.com",
+        "server_id": "s-001",
+        "server_name": "db-prod-01",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=90)).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+]
+
+
+# ---------------------------------------------------------------------------
+# Server management
 # ---------------------------------------------------------------------------
 
 async def get_servers() -> list[dict]:
-    """GET {BASE_URL}/servers/ — trả list server, mỗi item có thêm field
-    "ip" so với mock hiện tại (id, name, ip, tags)."""
+    """GET {BASE_URL}/servers/"""
+    if USE_MOCK:
+        return list(_MOCK_SERVERS)
     return await _request("GET", "/servers/")
 
 
-async def get_server(server_id: str) -> dict:
-    """GET {BASE_URL}/servers/{server_id} — chi tiết 1 server."""
-    return await _request("GET", f"/servers/{server_id}")
+async def update_server(
+    server_id: str,
+    name: str | None = None,
+    ip: str | None = None,
+    tags: list[str] | None = None,
+) -> dict:
+    """PUT {BASE_URL}/servers/{server_id}"""
+    if USE_MOCK:
+        for s in _MOCK_SERVERS:
+            if s["id"] == server_id:
+                if name is not None:
+                    s["name"] = name
+                if ip is not None:
+                    s["ip"] = ip
+                if tags is not None:
+                    s["tags"] = tags
+                return s
+        raise RuntimeError("Server not found")
 
+    payload = {}
+    if name is not None:
+        payload["name"] = name
+    if ip is not None:
+        payload["ip"] = ip
+    if tags is not None:
+        payload["tags"] = tags
 
-async def update_server(server_id: str, name: str, ip: str, tags: list[str]) -> dict:
-    """PATCH {BASE_URL}/servers/{server_id}
-    body: {"name": name, "ip": ip, "tags": tags}
-    (Có thêm "ip" so với bản mock trước đây — nhớ thêm ô nhập/hiển thị IP
-    trên form Sửa server.)"""
-    return await _request(
-        "PATCH", f"/servers/{server_id}", json={"name": name, "ip": ip, "tags": tags}
-    )
-
-
-async def create_server(name: str, ip: str, tags: list[str]) -> dict:
-    """POST {BASE_URL}/servers/ — backend hỗ trợ tạo mới, nhưng UI theo
-    quyết định cũ của nhóm là KHÔNG cho Thêm. Chỉ dùng hàm này nếu sau này
-    leader/nhóm đổi ý cho phép thêm server từ UI."""
-    return await _request(
-        "POST", "/servers/", json={"name": name, "ip": ip, "tags": tags}
-    )
-
-
-async def delete_server(server_id: str) -> None:
-    """DELETE {BASE_URL}/servers/{server_id} — tương tự create_server,
-    backend cho phép nhưng UI theo quyết định cũ là KHÔNG cho Xóa. Chỉ
-    dùng nếu nhóm đổi quyết định."""
-    await _request("DELETE", f"/servers/{server_id}")
+    return await _request("PUT", f"/servers/{server_id}", json=payload)
 
 
 # ---------------------------------------------------------------------------
-# Groups & policy — path Inh xác nhận 22/07: base "/auth/" và "/policy/"
-#
-# GET  /auth/groups/                    — danh sách nhóm
-# POST /auth/groups/                    — tạo nhóm mới
-# POST /policy/assign-user-group/       — gán user vào nhóm
-# GET  /policy/group-server/            — danh sách policy hiện có
-# POST /policy/group-server/            — tạo/gán policy mới
-#   body: {"group_id": UUID, "server_id": UUID,
-#          "max_duration_minutes": int, "require_approval": bool}
-#   *** LƯU Ý TÊN FIELD: "require_approval" (KHÔNG có "s") ***
-#   Mock hiện tại của mình (GROUP_SERVER_POLICY, main.py) đang dùng
-#   "requires_approval" (CÓ "s") — phải đổi tên field khi ghép thật, không
-#   thì backend không nhận, dễ lỗi âm thầm.
+# Group management
 # ---------------------------------------------------------------------------
 
 async def get_groups() -> list[dict]:
-    """GET {BASE_URL}/auth/groups/ — danh sách nhóm."""
-    return await _request("GET", "/auth/groups/")
-
-
-async def create_group(name: str) -> dict:
-    """POST {BASE_URL}/auth/groups/
-    body: {"name": name}"""
-    return await _request("POST", "/auth/groups/", json={"name": name})
-
-
-async def assign_user_to_group(user_id: str, group_id: str) -> dict:
-    """POST {BASE_URL}/policy/assign-user-group/
-    body: {"user_id": user_id, "group_id": group_id}"""
-    return await _request(
-        "POST",
-        "/policy/assign-user-group/",
-        json={"user_id": user_id, "group_id": group_id},
-    )
-
+    """GET {BASE_URL}/groups/"""
+    if USE_MOCK:
+        return list(_MOCK_GROUPS)
+    return await _request("GET", "/auth/groups/")  # <-- SỬA THÀNH THẾ NÀY
+# ---------------------------------------------------------------------------
+# Policy management (Group-Server)
+# ---------------------------------------------------------------------------
 
 async def list_group_server_policies() -> list[dict]:
-    """GET {BASE_URL}/policy/group-server/ — toàn bộ policy hiện có."""
+    """GET {BASE_URL}/policy/group-server/"""
+    if USE_MOCK:
+        return list(_MOCK_POLICIES)
     return await _request("GET", "/policy/group-server/")
 
 
 async def save_group_server_policy(
     group_id: str,
     server_id: str,
-    max_duration_minutes: int,
-    require_approval: bool,
+    max_duration_minutes: int = 60,
+    require_approval: bool = True,
 ) -> dict:
-    """POST {BASE_URL}/policy/group-server/
-    body: {"group_id": group_id, "server_id": server_id,
-           "max_duration_minutes": max_duration_minutes,
-           "require_approval": require_approval}
-    Chú ý: field tên là "require_approval", không phải "requires_approval"
-    như mock cũ."""
-    return await _request(
-        "POST",
-        "/policy/group-server/",
-        json={
+    """
+    Tạo/cập nhật policy cho cặp (group_id, server_id).
+
+    Backend thật CHƯA có PATCH/PUT để sửa policy, nên nếu policy đã
+    tồn tại (theo group_id+server_id) thì phải XÓA đi rồi TẠO LẠI —
+    nếu không sẽ bị lỗi 400 "Policy đã tồn tại".
+    """
+    if USE_MOCK:
+        for p in _MOCK_POLICIES:
+            if p["group_id"] == group_id and p["server_id"] == server_id:
+                p["max_duration_minutes"] = max_duration_minutes
+                p["require_approval"] = require_approval
+                return p
+        new_pol = {
+            "id": f"p-{uuid.uuid4().hex[:6]}",
             "group_id": group_id,
             "server_id": server_id,
             "max_duration_minutes": max_duration_minutes,
             "require_approval": require_approval,
-        },
+        }
+        _MOCK_POLICIES.append(new_pol)
+        return new_pol
+
+    existing_policies = await list_group_server_policies()
+    existing = next(
+        (p for p in existing_policies if p["group_id"] == group_id and p["server_id"] == server_id),
+        None,
     )
 
+    if existing:
+        await delete_group_server_policy(existing["id"])
+
+    payload = {
+        "group_id": group_id,
+        "server_id": server_id,
+        # "max_duration_minutes": max_duration_minutes,
+        # "require_approval": require_approval,
+    }
+    return await _request("POST", "/policy/group-server/", json=payload)
+
+
+async def delete_group_server_policy(policy_id: str) -> None:
+    """DELETE {BASE_URL}/policy/group-server/{policy_id}"""
+    if USE_MOCK:
+        _MOCK_POLICIES[:] = [p for p in _MOCK_POLICIES if p["id"] != policy_id]
+        return
+    await _request("DELETE", f"/policy/group-server/{policy_id}")
+
 
 # ---------------------------------------------------------------------------
-# Access requests (JIT flow) — field + path Inh xác nhận ngày 21-22/07:
-#
-# POST /access/requests/  (payload gửi lên)
-#   server_id (UUID), reason (string), requested_minutes (int)
-#   -- Không có group_id: Backend tự tra user_id (qua JWT sau này) -> group
-#      -> group_server_policy để enforce (400 Bad Request nếu vi phạm).
-#      UI vẫn giữ validate riêng (lọc server được phép, chặn vượt max phút)
-#      để UX tốt hơn — Inh xác nhận đây là mô hình chuẩn "Defense in
-#      Depth", 2 bên cùng check theo đúng group_server_policy, không sợ
-#      lệch nhau.
-#
-# GET /access/requests/  (mỗi item trả về)
-#   id (UUID), user_id (UUID), server_id (UUID), reason (string),
-#   requested_minutes (int),
-#   status ("pending" | "approved" | "rejected" | "expired"),
-#   created_at (datetime)
-#
-# POST /access/requests/{request_id}/review  (duyệt/từ chối)
-#   body: {"status": "approved"}  hoặc  {"status": "rejected"}
+# Access requests
 # ---------------------------------------------------------------------------
+
+async def list_access_requests() -> list[dict]:
+    """GET {BASE_URL}/access/requests/"""
+    if USE_MOCK:
+        return list(_MOCK_REQUESTS)
+    return await _request("GET", "/access/requests/")
+
 
 async def create_access_request(
-    server_id: str, reason: str, requested_minutes: int
+    group_id: str, server_id: str, reason: str, duration_minutes: int = 60
 ) -> dict:
-    """POST {BASE_URL}/access/requests/
-    body: {"server_id": server_id, "reason": reason,
-           "requested_minutes": requested_minutes}
-    Không truyền group_id — backend tự xác định qua user đăng nhập (JWT).
-    Trả về object với field: id, user_id, server_id, reason,
-    requested_minutes, status, created_at.
-    Backend có thể trả 400 nếu vi phạm group_server_policy — main.py cần
-    bắt lỗi này và hiển thị lại thành banner đỏ giống lỗi validate ở UI."""
-    return await _request(
-        "POST",
-        "/access/requests/",
-        json={
+    """
+    POST {BASE_URL}/access/requests/
+    """
+    if USE_MOCK:
+        new_req = {
+            "id": f"req-{uuid.uuid4().hex[:6]}",
+            "group_id": group_id,
             "server_id": server_id,
+            "user_email": "user_demo@example.com",
             "reason": reason,
-            "requested_minutes": requested_minutes,
-        },
-    )
+            "duration_minutes": duration_minutes,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+        }
+        _MOCK_REQUESTS.append(new_req)
+        return new_req
 
-
-async def list_access_requests(status: str | None = None) -> list[dict]:
-    """GET {BASE_URL}/access/requests/?status={status}
-    Mỗi item: id, user_id, server_id, reason, requested_minutes, status,
-    created_at."""
-    params = {"status": status} if status else None
-    return await _request("GET", "/access/requests/", params=params)
+    payload = {
+        "group_id": group_id,
+        "server_id": server_id,
+        "reason": reason,
+        "duration_minutes": duration_minutes,
+    }
+    return await _request("POST", "/access/requests/", json=payload)
 
 
 async def review_access_request(request_id: str, status: str) -> dict:
-    """POST {BASE_URL}/access/requests/{request_id}/review
-    body: {"status": "approved" | "rejected"}
-    Thay cho 2 hàm approve/reject riêng trước đây — Inh gộp chung 1
-    endpoint "review", truyền status tương ứng."""
+    """
+    POST {BASE_URL}/access/requests/{request_id}/review
+    """
+    if USE_MOCK:
+        req = next((r for r in _MOCK_REQUESTS if r["id"] == request_id), None)
+        if not req:
+            raise RuntimeError("Request not found")
+        req["status"] = status
+        if status == "approved":
+            _mock_create_grant(req)
+        return req
     return await _request(
         "POST", f"/access/requests/{request_id}/review", json={"status": status}
     )
 
 
+def _mock_create_grant(req: dict):
+    s = next((srv for srv in _MOCK_SERVERS if srv["id"] == req["server_id"]), None)
+    s_name = s["name"] if s else req["server_id"]
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(minutes=req.get("duration_minutes", 60))
+    _MOCK_GRANTS.append(
+        {
+            "id": f"g-{uuid.uuid4().hex[:6]}",
+            "user_email": req.get("user_email", "user@example.com"),
+            "server_id": req["server_id"],
+            "server_name": s_name,
+            "expires_at": expires.isoformat(),
+            "created_at": now.isoformat(),
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
-# Active grants — Inh xác nhận: TÁCH RIÊNG hoàn toàn khỏi request.
-#   - AccessRequest = "đơn xin" (lưu lịch sử: ai xin, khi nào, ai duyệt).
-#   - ActiveGrant   = "thẻ ra vào" thực tế, chỉ sinh ra khi request
-#     chuyển sang approved.
-#
-# GET /access/grants/  (mỗi item trả về)
-#   id (UUID, Grant ID), request_id (UUID, trỏ ngược đơn gốc),
-#   user_id (UUID), server_id (UUID),
-#   granted_at (datetime), expires_at (datetime = granted_at + requested_minutes)
-#
-# DELETE /access/grants/{grant_id}  — thu hồi khẩn cấp
-#   (Inh ghi chú: có thể là POST /access/grants/{grant_id}/revoke tùy
-#   router Inh chọn cuối cùng — cần hỏi lại lúc ghép thật nếu 2 cách đều
-#   không ăn.)
-#
-# => Khi ghép thật, main.py build màn "Quyền active" bằng list_active_grants()
-#    trực tiếp (KHÔNG lọc access_requests_db theo status=="approved" như
-#    bản mock hiện tại) — join server_id với get_servers() để lấy tên/tag
-#    hiển thị, dùng expires_at để tính đồng hồ đếm ngược.
+# Active grants
 # ---------------------------------------------------------------------------
 
 async def list_active_grants() -> list[dict]:
-    """GET {BASE_URL}/access/grants/
-    Mỗi item: id, request_id, user_id, server_id, granted_at, expires_at."""
+    """GET {BASE_URL}/access/grants/"""
+    if USE_MOCK:
+        return list(_MOCK_GRANTS)
     return await _request("GET", "/access/grants/")
 
 
-async def revoke_grant(grant_id: str, reason: str = "") -> None:
-    """DELETE {BASE_URL}/access/grants/{grant_id}
-    Nếu Inh dùng router khác, đổi thành:
-    POST {BASE_URL}/access/grants/{grant_id}/revoke"""
-    await _request("DELETE", f"/access/grants/{grant_id}", json={"reason": reason} if reason else None)
+async def revoke_grant(grant_id: str) -> None:
+    """POST {BASE_URL}/access/grants/{grant_id}/revoke"""
+    if USE_MOCK:
+        _MOCK_GRANTS[:] = [g for g in _MOCK_GRANTS if g["id"] != grant_id]
+        return
+    await _request("POST", f"/access/grants/{grant_id}/revoke")
 
 
 # ---------------------------------------------------------------------------
-# Helper dùng chung khi ghép thật (ví dụ mẫu, chỉnh lại theo cách Inh trả lỗi)
+# Helper dùng chung
 # ---------------------------------------------------------------------------
 
-async def _request(method: str, path: str, **kwargs) -> dict:
-    """Hàm dùng chung để gọi Control Plane, tự raise lỗi rõ ràng nếu API
-    trả về mã lỗi, để main.py bắt và hiển thị banner đỏ cho người dùng."""
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=10) as client:
+async def _request(method: str, path: str, **kwargs) -> dict | list:
+    """Gọi Control Plane thật với timeout vọt lên 15s tránh drop kết nối Tailscale."""
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=15.0) as client:
         response = await client.request(method, path, **kwargs)
         response.raise_for_status()
+        if response.status_code == 204 or not response.content:
+            return {}
         return response.json()
-
-
-# ---------------------------------------------------------------------------
-# GHI CHÚ (cập nhật 22/07, sau khi Inh trả lời đầy đủ qua d.docx + tin nhắn):
-#
-# ĐÃ CHỐT — đủ path để ghép cả 4 màn:
-# 1. group_server_policy: Backend enforce bắt buộc (400 nếu vi phạm), UI
-#    vẫn giữ validate riêng cho UX — Defense in Depth, an toàn.
-# 2. Approve/reject: POST /access/requests/{request_id}/review,
-#    body {"status": "approved"|"rejected"}.
-# 3. Active Grant tách hoàn toàn khỏi Request.
-# 4. Servers: CRUD đủ ở base /servers/ — nhưng UI theo quyết định cũ của
-#    nhóm CHỈ dùng get_servers() + update_server(), KHÔNG gọi
-#    create_server()/delete_server() trừ khi nhóm đổi quyết định.
-# 5. Groups & policy: base /auth/ (nhóm) và /policy/ (gán user, policy).
-#
-# CẦN LƯU Ý KHI GHÉP THẬT (dễ gây lỗi nếu bỏ qua):
-# - Field tên policy là "require_approval" (không có "s") — mock cũ trong
-#   main.py đang đặt tên "requires_approval" (có "s"). Không đổi tên biến
-#   trong main.py/template, CHỈ đổi tên key lúc build JSON gửi đi trong
-#   save_group_server_policy() ở trên (đã làm sẵn).
-# - Server thật có thêm field "ip" mà mock cũ không có — cần thêm ô
-#   nhập/hiển thị IP trong form Sửa server (servers.html/_servers_table.html)
-#   khi ghép thật.
-# - BASE_URL trùng port 8000 với UI — xem ghi chú ngay dưới BASE_URL ở đầu
-#   file, nhớ đổi port UI khi chạy song song để test.
-# - id thật là UUID (vd "3fa85f64-5717-4562-b3fc-2c963f66afa6"), không phải
-#   chuỗi ngắn kiểu "s-001"/"g-support" như trong mock — không ảnh hưởng
-#   code (đều là string) nhưng UI hiển thị id sẽ dài hơn, có thể cần rút
-#   gọn khi hiển thị (vd chỉ hiện 8 ký tự đầu).
-# ---------------------------------------------------------------------------

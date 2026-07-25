@@ -8,13 +8,78 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+from authlib.integrations.starlette_client import OAuth
 
 import api_client
 
 app = FastAPI(title="PAM Gateway - Authorization & UI")
+
+# ---------------------------------------------------------------------------
+# Đăng nhập qua Keycloak (OIDC)
+# ---------------------------------------------------------------------------
+
+oauth = OAuth()
+oauth.register(
+    name="keycloak",
+    server_metadata_url="https://localhost/auth/realms/pam-realm/.well-known/openid-configuration",
+    client_id="pam-control-ui",
+    client_kwargs={"scope": "openid profile email", "verify": False},
+    # verify: False vì Keycloak đang chạy chứng chỉ SSL tự ký (self-signed),
+    # giống Vinh phải dùng cờ -k trong lệnh curl.
+)
+
+# Các đường dẫn không cần đăng nhập mới vào được
+PUBLIC_PATHS = ("/login", "/auth/callback", "/static", "/logout")
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Chặn mọi trang, bắt đăng nhập trước, trừ các PUBLIC_PATHS ở trên."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith(PUBLIC_PATHS):
+            return await call_next(request)
+
+        user = request.session.get("user")
+        if not user:
+            return RedirectResponse(url="/login")
+
+        # Đổ token của người đang đăng nhập vào "hộp tạm" trong api_client
+        # để mọi lệnh gọi Control Plane trong request này tự đính kèm token.
+        api_client.current_token.set(request.session.get("access_token"))
+        return await call_next(request)
+
+
+# LƯU Ý THỨ TỰ: add_middleware sau cùng sẽ chạy TRƯỚC — nên phải thêm
+# AuthMiddleware trước, SessionMiddleware sau, để session có sẵn khi
+# AuthMiddleware kiểm tra request.session.
+app.add_middleware(AuthMiddleware)
+app.add_middleware(SessionMiddleware, secret_key="doi-chuoi-nay-thanh-ngau-nhien-truoc-khi-deploy-that")
+
+
+@app.get("/login")
+async def login(request: Request):
+    redirect_uri = "http://localhost:8001/auth/callback"
+    return await oauth.keycloak.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request):
+    token = await oauth.keycloak.authorize_access_token(request)
+    userinfo = token.get("userinfo") or {}
+    request.session["user"] = dict(userinfo)
+    request.session["access_token"] = token.get("access_token")
+    return RedirectResponse(url="/")
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login")
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 

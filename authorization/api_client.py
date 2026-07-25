@@ -10,6 +10,15 @@ import httpx
 BASE_URL = "http://100.115.241.108:8000"  # URL Control Plane của Inh
 USE_MOCK = False  # Đang gọi API thật qua Tailscale
 
+import contextvars
+
+# "Hộp tạm" giữ token JWT của người đang đăng nhập, để hàm _request() phía dưới
+# tự lấy ra và đính kèm vào mọi request gọi lên Control Plane. main.py sẽ đổ
+# token vào đây ngay khi mỗi request tới trang web bắt đầu.
+current_token: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_token", default=None
+)
+
 
 # ---------------------------------------------------------------------------
 # DỮ LIỆU MOCK — chỉ dùng khi USE_MOCK = True.
@@ -273,8 +282,13 @@ async def revoke_grant(grant_id: str) -> None:
 
 async def _request(method: str, path: str, **kwargs) -> dict | list:
     """Gọi Control Plane thật với timeout vọt lên 15s tránh drop kết nối Tailscale."""
+    headers = kwargs.pop("headers", {}) or {}
+    token = current_token.get()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=15.0) as client:
-        response = await client.request(method, path, **kwargs)
+        response = await client.request(method, path, headers=headers, **kwargs)
         response.raise_for_status()
         if response.status_code == 204 or not response.content:
             return {}

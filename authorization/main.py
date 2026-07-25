@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -63,16 +64,64 @@ app.add_middleware(SessionMiddleware, secret_key="doi-chuoi-nay-thanh-ngau-nhien
 
 @app.get("/login")
 async def login(request: Request):
-    redirect_uri = "http://localhost:8001/auth/callback"
-    return await oauth.keycloak.authorize_redirect(request, redirect_uri)
+    metadata = await oauth.keycloak.load_server_metadata()
+    auth_endpoint = metadata["authorization_endpoint"]
+    from urllib.parse import urlencode
+    import secrets
+    state = secrets.token_urlsafe(16)
+    request.session["oauth_state"] = state
+    params = {
+        "response_type": "code",
+        "client_id": "pam-control-ui",
+        "redirect_uri": "http://localhost:8001/auth/callback",
+        "scope": "openid profile email",
+        "state": state,
+    }
+    return RedirectResponse(url=f"{auth_endpoint}?{urlencode(params)}")
 
 
 @app.get("/auth/callback")
 async def auth_callback(request: Request):
-    token = await oauth.keycloak.authorize_access_token(request)
-    userinfo = token.get("userinfo") or {}
-    request.session["user"] = dict(userinfo)
-    request.session["access_token"] = token.get("access_token")
+    code = request.query_params.get("code")
+    if not code:
+        return HTMLResponse(
+            f"Không nhận được code. Params: {dict(request.query_params)}",
+            status_code=400
+        )
+
+    metadata = await oauth.keycloak.load_server_metadata()
+    token_endpoint = metadata["token_endpoint"]
+
+    async with httpx.AsyncClient(verify=False) as client:
+        resp = await client.post(
+            token_endpoint,
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": "http://localhost:8001/auth/callback",
+                "client_id": "pam-control-ui",
+            },
+        )
+
+    if resp.status_code != 200:
+        return HTMLResponse(
+            f"<h3>Lỗi lấy token</h3><p>Status: {resp.status_code}</p><pre>{resp.text}</pre>",
+            status_code=500,
+        )
+
+    token = resp.json()
+    access_token = token.get("access_token", "")
+
+    import base64 as b64, json as json_lib
+    try:
+        payload_part = access_token.split(".")[1]
+        payload_part += "=" * (4 - len(payload_part) % 4)
+        userinfo = json_lib.loads(b64.urlsafe_b64decode(payload_part))
+    except Exception:
+        userinfo = {}
+
+    request.session["user"] = userinfo
+    request.session["access_token"] = access_token
     return RedirectResponse(url="/")
 
 
@@ -80,8 +129,6 @@ async def auth_callback(request: Request):
 async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login")
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):

@@ -35,6 +35,7 @@ services:
       KC_DB_USERNAME: pam_user
       KC_DB_PASSWORD: pam_password
       KC_HTTP_RELATIVE_PATH: /auth
+      KC_PROXY: edge
     volumes:
       - ./keycloak/pam-realm.json:/opt/keycloak/data/import/pam-realm.json:ro
     depends_on:

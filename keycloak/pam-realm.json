@@ -1,0 +1,56 @@
+{
+  "realm": "pam-realm",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "PAM-Admins",
+        "description": "Administrator Role"
+      },
+      {
+        "name": "PAM-Support",
+        "description": "Support Engineer Role"
+      },
+      {
+        "name": "PAM-Auditors",
+        "description": "Auditor Role"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "pam-control-ui",
+      "name": "PAM Control Plane UI (Nghia)",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "http://localhost:8001/auth/callback",
+        "http://localhost:8001/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8001"
+      ]
+    },
+    {
+      "clientId": "guacamole-client",
+      "name": "Apache Guacamole Client",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "https://localhost/*",
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "https://localhost"
+      ]
+    }
+  ]
+}

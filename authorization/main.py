@@ -20,6 +20,35 @@ import api_client
 
 app = FastAPI(title="PAM Gateway - Authorization & UI")
 
+
+# ---------------------------------------------------------------------------
+# Bước B: đọc nhóm thật từ role Keycloak (realm_access.roles trong JWT)
+# ---------------------------------------------------------------------------
+
+def _extract_pam_roles(userinfo: dict) -> list[str]:
+    """Lấy các role dạng PAM-* từ claim realm_access.roles trong JWT."""
+    roles = (userinfo.get("realm_access") or {}).get("roles", [])
+    return [r for r in roles if r.startswith("PAM-")]
+
+
+def _normalize(name: str) -> str:
+    return name.strip().lower().rstrip("s")
+
+
+def resolve_groups_for_roles(groups: list[dict], roles: list[str]) -> list[dict]:
+    """
+    Khớp role Keycloak (vd 'PAM-Admins') với group thật của Inh.
+    Đã xác nhận: tên group bên Inh giống hệt tên role Keycloak
+    (vd group 'PAM-Admins' <-> role 'PAM-Admins'), nên so sánh trực tiếp.
+    """
+    matched = []
+    for role in roles:
+        role_norm = _normalize(role)
+        for g in groups:
+            if _normalize(g["name"]) == role_norm and g not in matched:
+                matched.append(g)
+    return matched
+
 # ---------------------------------------------------------------------------
 # Đăng nhập qua Keycloak (OIDC)
 # ---------------------------------------------------------------------------
@@ -122,6 +151,7 @@ async def auth_callback(request: Request):
 
     request.session["user"] = userinfo
     request.session["access_token"] = access_token
+    request.session["roles"] = _extract_pam_roles(userinfo)
     return RedirectResponse(url="/")
 
 
@@ -239,6 +269,7 @@ def attach_request_display(r: dict, servers: list[dict]) -> dict:
 @app.get("/", response_class=HTMLResponse)
 async def request_access_page(request: Request, group_id: str | None = None):
     load_error = None
+    role_warning = None
     groups, servers, policies, requests_raw = [], [], [], []
     try:
         groups = await api_client.get_groups()
@@ -248,9 +279,20 @@ async def request_access_page(request: Request, group_id: str | None = None):
     except Exception as exc:
         load_error = _error_message(exc)
 
-    selected_group = find_group(groups, group_id) if group_id else None
-    if selected_group is None and groups:
-        selected_group = groups[0]
+    user_roles = request.session.get("roles", [])
+    my_groups = resolve_groups_for_roles(groups, user_roles)
+
+    if not my_groups:
+        role_display = ", ".join(user_roles) if user_roles else "không có role PAM-*"
+        role_warning = (
+            f"Không khớp được role Keycloak ({role_display}) với nhóm nào bên Control Plane. "
+            "Cần xác nhận lại tên/group_id với Inh. Đang tạm cho chọn nhóm thủ công để test."
+        )
+        my_groups = groups
+
+    selected_group = find_group(my_groups, group_id) if group_id else None
+    if selected_group is None and my_groups:
+        selected_group = my_groups[0]
 
     allowed_servers = (
         allowed_servers_for_group(servers, policies, selected_group["id"])
@@ -262,11 +304,13 @@ async def request_access_page(request: Request, group_id: str | None = None):
         request,
         "index.html",
         {
-            "groups": groups,
+            "groups": my_groups,
             "selected_group_id": selected_group["id"] if selected_group else None,
             "allowed_servers": allowed_servers,
             "access_requests": access_requests,
             "load_error": load_error,
+            "role_warning": role_warning,
+            "is_locked_group": len(my_groups) == 1 and not role_warning,
         },
     )
 

@@ -26,21 +26,22 @@
             <div class="alert alert-error">{{ load_error }}</div>
             {% endif %}
 
-            {#
-              CHƯA có đăng nhập thật (chờ Vinh + Inh xong JWT Keycloak), nên
-              cho "đóng vai" 1 nhóm bằng dropdown này để demo/test validation
-              theo group_server_policy. Đổi nhóm -> load lại trang (GET) với
-              ?group_id=... Sau này có JWT thật thì bỏ dropdown, lấy group_id
-              từ user đăng nhập.
-            #}
+            {% if role_warning %}
+            <div class="alert alert-error">{{ role_warning }}</div>
+            {% endif %}
+
+            {% if is_locked_group %}
+            <p class="form-row"><strong>Nhóm của bạn:</strong> {{ groups[0].name }}</p>
+            {% else %}
             <form method="get" action="/" class="form-row" style="max-width: 260px;">
-                <label for="group_id">Đóng vai nhóm (demo, chờ đăng nhập thật)</label>
+                <label for="group_id">Chọn nhóm (tạm thời, chờ xác nhận mapping)</label>
                 <select name="group_id" id="group_id" onchange="this.form.submit()">
                     {% for g in groups %}
                     <option value="{{ g.id }}" {% if g.id == selected_group_id %}selected{% endif %}>{{ g.name }}</option>
                     {% endfor %}
                 </select>
             </form>
+            {% endif %}
 
             <div id="request-error"></div>
 

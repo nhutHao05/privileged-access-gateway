@@ -278,20 +278,31 @@ async def request_access_page(request: Request, group_id: str | None = None):
         requests_raw = await api_client.list_access_requests()
     except Exception as exc:
         load_error = _error_message(exc)
-        print(f"=== [DEBUG /] LỖI CHI TIẾT === {type(exc).__name__}: {exc}")
-        import traceback
-        traceback.print_exc()
 
     user_roles = request.session.get("roles", [])
-    my_groups = resolve_groups_for_roles(groups, user_roles)
+    my_groups = []
 
-    if not my_groups:
-        role_display = ", ".join(user_roles) if user_roles else "không có role PAM-*"
-        role_warning = (
-            f"Không khớp được role Keycloak ({role_display}) với nhóm nào bên Control Plane. "
-            "Cần xác nhận lại tên/group_id với Inh. Đang tạm cho chọn nhóm thủ công để test."
-        )
-        my_groups = groups
+    if not load_error:
+        # Chỉ tính role_warning khi Control Plane trả về dữ liệu bình thường —
+        # nếu load_error đã xảy ra thì không có "groups" thật để mà so khớp,
+        # nói "không khớp role" lúc đó sẽ gây hiểu lầm (như vụ /auth/groups/ 500).
+        my_groups = resolve_groups_for_roles(groups, user_roles)
+
+        if not user_roles:
+            # Trường hợp B: tài khoản chưa được gán role PAM-* nào cả.
+            role_warning = (
+                "Tài khoản của bạn chưa được gán quyền (role) nào trong hệ thống. "
+                "Liên hệ quản trị viên để được cấp role phù hợp "
+                "(PAM-Admins / PAM-Support / PAM-Auditors)."
+            )
+        elif not my_groups:
+            # Trường hợp C: có role nhưng tên không khớp nhóm nào bên Inh.
+            role_display = ", ".join(user_roles)
+            role_warning = (
+                f"Không khớp được role Keycloak ({role_display}) với nhóm nào bên Control Plane. "
+                "Cần xác nhận lại tên/group_id với Inh. Đang tạm cho chọn nhóm thủ công để test."
+            )
+            my_groups = groups
 
     selected_group = find_group(my_groups, group_id) if group_id else None
     if selected_group is None and my_groups:

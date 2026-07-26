@@ -113,24 +113,6 @@ services:
       PASSWORD: "secret_vnc_password"
     networks:
       - pam_targets
-  guacamole:
-    image: guacamole/guacamole:1.5.4
-    container_name: pam_guacamole
-    environment:
-      GUACD_HOSTNAME: guacd
-      GUACD_PORT: 4822
-      POSTGRES_HOSTNAME: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DATABASE: guacamole
-      POSTGRES_USER: pam_user
-      POSTGRES_PASSWORD: pam_password
-      # Thêm dòng này để fix lỗi crash Java/cgroup v2 trên Windows:
-      JAVA_OPTS: "-XX:-UseContainerSupport"
-    depends_on:
-      - guacd
-      - postgres
-    networks:
-      - pam_backend
   # ==========================================
   # 6. Audit & Storage (Phần của Sang)
   # ==========================================

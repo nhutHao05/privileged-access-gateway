@@ -66,6 +66,7 @@ services:
       POSTGRES_DATABASE: guacamole
       POSTGRES_USER: pam_user
       POSTGRES_PASSWORD: pam_password
+      JAVA_OPTS: "-XX:-UseContainerSupport"
     depends_on:
       - guacd
       - postgres
@@ -112,7 +113,59 @@ services:
       PASSWORD: "secret_vnc_password"
     networks:
       - pam_targets
+  guacamole:
+    image: guacamole/guacamole:1.5.4
+    container_name: pam_guacamole
+    environment:
+      GUACD_HOSTNAME: guacd
+      GUACD_PORT: 4822
+      POSTGRES_HOSTNAME: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: guacamole
+      POSTGRES_USER: pam_user
+      POSTGRES_PASSWORD: pam_password
+      # Thêm dòng này để fix lỗi crash Java/cgroup v2 trên Windows:
+      JAVA_OPTS: "-XX:-UseContainerSupport"
+    depends_on:
+      - guacd
+      - postgres
+    networks:
+      - pam_backend
+  # ==========================================
+  # 6. Audit & Storage (Phần của Sang)
+  # ==========================================
+  minio:
+    image: minio/minio
+    container_name: pam_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: admin_pam
+      MINIO_ROOT_PASSWORD: super_secret_password
+    command: server /data --console-address ":9001"
+    networks:
+      - pam_backend
 
+  audit_worker:
+    build: 
+      context: ./audit_worker
+    container_name: pam_audit_worker
+    environment:
+      MINIO_URL: minio:9000
+      MINIO_ACCESS_KEY: admin_pam
+      MINIO_SECRET_KEY: super_secret_password
+      MINIO_BUCKET_NAME: pam-audit-logs
+      # Địa chỉ API backend (Inh nhớ mở API này)
+      CONTROL_PLANE_API: http://pam_control_plane:8000/api/v1/audit
+      GUAC_LOGS_DIR: /logs
+    volumes:
+      # Mount chung thư mục với guacd để đọc file video raw
+      - ./recordings:/logs
+    depends_on:
+      - minio
+    networks:
+      - pam_backend
 networks:
   pam_frontend:
     driver: bridge

@@ -278,6 +278,9 @@ async def request_access_page(request: Request, group_id: str | None = None):
         requests_raw = await api_client.list_access_requests()
     except Exception as exc:
         load_error = _error_message(exc)
+        print(f"=== [DEBUG /] LỖI CHI TIẾT === {type(exc).__name__}: {exc}")
+        import traceback
+        traceback.print_exc()
 
     user_roles = request.session.get("roles", [])
     my_groups = resolve_groups_for_roles(groups, user_roles)

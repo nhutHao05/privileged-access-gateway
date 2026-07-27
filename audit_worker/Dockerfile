@@ -1,38 +1,23 @@
-FROM python:3.10-slim
+FROM guacamole/guacd:1.5.4
 
-# Cài đặt các thư viện cần thiết để biên dịch guacenc
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libcairo2-dev \
-    libjpeg-dev \
-    libpng-dev \
-    libtool-bin \
-    libossp-uuid-dev \
-    libvncserver-dev \
-    freerdp2-dev \
-    libssh2-1-dev \
-    libtelnet-dev \
-    libwebsockets-dev \
-    libpulse-dev \
-    libvorbis-dev \
-    libwebp-dev \
-    libssl-dev \
-    libpango1.0-dev \
-    libswscale-dev \
-    libavcodec-dev \
-    libavutil-dev \
-    libavformat-dev \
-    guacamole-server \
-    && rm -rf /var/lib/apt/lists/*
+# Chuyển sang quyền root để cài đặt thêm thư viện
+USER root
+
+# guacd 1.5.4 được build trên nền Alpine Linux, ta cài thêm Python3 và Pip
+RUN apk update && apk add --no-cache python3 py3-pip
 
 WORKDIR /app
 
-# Copy requirement và cài đặt thư viện Python
+# Copy requirement và cài đặt
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Alpine dùng pip mới có thể báo lỗi PEP668, dùng --break-system-packages
+RUN pip3 install --no-cache-dir -r requirements.txt --break-system-packages || pip3 install --no-cache-dir -r requirements.txt
 
-# Copy toàn bộ code
+# Copy toàn bộ code worker
 COPY . .
 
-# Lệnh chạy Worker
-CMD ["python", "worker.py"]
+# Vô hiệu hóa ENTRYPOINT mặc định của guacd (vốn dùng để chạy server)
+ENTRYPOINT []
+
+# Lệnh chạy Worker của Sang
+CMD ["python3", "worker.py"]

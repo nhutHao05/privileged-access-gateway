@@ -140,6 +140,7 @@ async def auth_callback(request: Request):
 
     token = resp.json()
     access_token = token.get("access_token", "")
+    id_token = token.get("id_token", "")
 
     import base64 as b64, json as json_lib
     try:
@@ -149,16 +150,53 @@ async def auth_callback(request: Request):
     except Exception:
         userinfo = {}
 
-    request.session["user"] = userinfo
+    # CHỈ lưu vài field nhỏ cần thiết, KHÔNG lưu nguyên payload JWT đầy đủ.
+    # Lý do: session của app này lưu toàn bộ trong 1 cookie (không phải
+    # server-side session), cookie trình duyệt giới hạn ~4KB. Payload JWT
+    # gốc của Keycloak (đặc biệt realm_access/resource_access) có thể khá
+    # nặng; cộng thêm access_token + id_token dễ vượt giới hạn, khiến
+    # trình duyệt âm thầm không lưu cookie -> lặp vô hạn login.
+    request.session["user"] = {
+        "sub": userinfo.get("sub"),
+        "preferred_username": userinfo.get("preferred_username"),
+    }
     request.session["access_token"] = access_token
+    request.session["id_token"] = id_token
     request.session["roles"] = _extract_pam_roles(userinfo)
     return RedirectResponse(url="/")
 
 
 @app.get("/logout")
 async def logout(request: Request):
+    """
+    Đăng xuất hoàn toàn: xoá session của app PAM Gateway,
+    ĐỒNG THỜI redirect sang end_session_endpoint của Keycloak để xoá
+    luôn phiên SSO. Nếu vì lý do gì đó không lấy được id_token
+    (vd session cũ trước khi có thay đổi này), fallback về logout
+    kiểu cũ (chỉ xoá session app) để không bị lỗi 500.
+    """
+    id_token = request.session.get("id_token")
     request.session.clear()
-    return RedirectResponse(url="/login")
+
+    if not id_token:
+        return RedirectResponse(url="/login")
+
+    try:
+        metadata = await oauth.keycloak.load_server_metadata()
+        end_session_endpoint = metadata.get("end_session_endpoint")
+    except Exception:
+        end_session_endpoint = None
+
+    if not end_session_endpoint:
+        return RedirectResponse(url="/login")
+
+    from urllib.parse import urlencode
+    params = {
+        "id_token_hint": id_token,
+        "client_id": "pam-control-ui",
+        "post_logout_redirect_uri": "http://localhost:8001/login",
+    }
+    return RedirectResponse(url=f"{end_session_endpoint}?{urlencode(params)}")
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):

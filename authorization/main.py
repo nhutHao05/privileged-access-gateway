@@ -338,9 +338,11 @@ async def request_access_page(request: Request, group_id: str | None = None):
             role_display = ", ".join(user_roles)
             role_warning = (
                 f"Không khớp được role Keycloak ({role_display}) với nhóm nào bên Control Plane. "
-                "Cần xác nhận lại tên/group_id với Inh. Đang tạm cho chọn nhóm thủ công để test."
+                "Liên hệ quản trị viên để kiểm tra lại cấu hình nhóm/role."
             )
-            my_groups = groups
+            # Không còn fallback cho chọn nhóm thủ công (đã gỡ demo dropdown) —
+            # nếu role không khớp thì chặn hẳn, không cho request tới khi nào
+            # mapping được sửa đúng.
 
     selected_group = find_group(my_groups, group_id) if group_id else None
     if selected_group is None and my_groups:
@@ -362,7 +364,6 @@ async def request_access_page(request: Request, group_id: str | None = None):
             "access_requests": access_requests,
             "load_error": load_error,
             "role_warning": role_warning,
-            "is_locked_group": len(my_groups) == 1 and not role_warning,
         },
     )
 

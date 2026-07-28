@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-BASE_URL = "http://100.115.241.108:8000"  # URL Control Plane của Inh
+BASE_URL = "http://52.55.177.7:8000"
 USE_MOCK = False  # Đang gọi API thật qua Tailscale
 
 import contextvars

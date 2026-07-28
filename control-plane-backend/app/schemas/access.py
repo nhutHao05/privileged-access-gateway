@@ -5,21 +5,24 @@ from uuid import UUID
 
 # Schema gửi yêu cầu xin truy cập
 class AccessRequestCreate(BaseModel):
+    user_id: Optional[UUID] = None  # Nếu không truyền, tự động lấy từ Keycloak Token
+    group_id: Optional[UUID] = None  # Nhóm của user / nhóm xin quyền từ UI Nghĩa
+    server_id: UUID
+    reason: str
+    requested_minutes: int = Field(default=60, ge=1, le=480, description="Số phút cần truy cập")
+
+# Schema trả về thông tin Yêu cầu
+class AccessRequestResponse(BaseModel):
+    id: UUID
     user_id: UUID
     server_id: UUID
     reason: str
-    requested_minutes: int = 60
-
-# Schema trả về thông tin Yêu cầu
-class AccessRequestResponse(AccessRequestCreate):
-    id: UUID
+    requested_minutes: int
     status: str
-    # Dùng requested_at từ Model DB và map sang created_at nếu client cần
-    requested_at: Optional[datetime] = Field(default=None, alias="created_at")
+    requested_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-        populate_by_name = True
 
 # Schema duyệt/từ chối Yêu cầu
 class AccessRequestReview(BaseModel):

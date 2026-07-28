@@ -1,20 +1,19 @@
 from pydantic import BaseModel
-from uuid import UUID
+from typing import Optional
 from datetime import datetime
+from uuid import UUID
 
-# Schema gán User vào Group
-class UserGroupAssign(BaseModel):
-    user_id: UUID
-    group_id: UUID
-
-# Schema tạo Policy kết nối Group với Server
+# Schema nhận dữ liệu từ Frontend gửi lên (POST body)
 class GroupServerPolicyCreate(BaseModel):
     group_id: UUID
     server_id: UUID
+    max_duration_minutes: int = 60
+    require_approval: bool = True
 
+# Schema trả dữ liệu về lại cho Frontend (Response body)
 class GroupServerPolicyResponse(GroupServerPolicyCreate):
     id: UUID
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

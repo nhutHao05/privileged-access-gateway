@@ -16,6 +16,7 @@ services:
     depends_on:
       - guacamole
       - keycloak
+      - control-plane-backend
     networks:
       - pam_frontend
       - pam_backend
@@ -74,7 +75,27 @@ services:
       - pam_backend
 
   # ==========================================
-  # 4. Database (Shared Postgres for KC & Guac)
+  # 4. Control Plane Backend (FastAPI - Inh)
+  # ==========================================
+  control-plane-backend:
+    build:
+      context: ./control-plane-backend
+      dockerfile: Dockerfile
+    container_name: pam_control_backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./control-plane-backend/.env.docker
+    depends_on:
+      - postgres
+      - guacamole
+      - keycloak
+    networks:
+      - pam_backend
+      - pam_frontend
+
+  # ==========================================
+  # 5. Database (Shared Postgres for KC, Guac & Control Plane)
   # ==========================================
   postgres:
     image: postgres:15-alpine
@@ -90,7 +111,7 @@ services:
       - pam_backend
 
   # ==========================================
-  # 5. Target Servers (For Testing SSH & VNC)
+  # 6. Target Servers (For Testing SSH & VNC)
   # ==========================================
   target_linux_ssh:
     image: lscr.io/linuxserver/openssh-server:latest
@@ -113,8 +134,9 @@ services:
       PASSWORD: "secret_vnc_password"
     networks:
       - pam_targets
+
   # ==========================================
-  # 6. Audit & Storage (Phần của Sang)
+  # 7. Audit & Storage (MinIO & Worker - Sang)
   # ==========================================
   minio:
     image: minio/minio
@@ -138,16 +160,16 @@ services:
       MINIO_ACCESS_KEY: admin_pam
       MINIO_SECRET_KEY: super_secret_password
       MINIO_BUCKET_NAME: pam-audit-logs
-      # Địa chỉ API backend (Inh nhớ mở API này)
-      CONTROL_PLANE_API: http://pam_control_plane:8000/api/v1/audit
+      CONTROL_PLANE_API: http://control-plane-backend:8000/audit
       GUAC_LOGS_DIR: /logs
     volumes:
-      # Mount chung thư mục với guacd để đọc file video raw
       - ./recordings:/logs
     depends_on:
       - minio
+      - control-plane-backend
     networks:
       - pam_backend
+
 networks:
   pam_frontend:
     driver: bridge

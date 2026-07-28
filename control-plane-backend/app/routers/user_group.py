@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from uuid import UUID
 
 from app.schemas.user_group import UserCreate, UserResponse, GroupCreate, GroupResponse
 from app.models.auth_rbac import User, Group
@@ -48,3 +49,20 @@ def create_group(group_in: GroupCreate, db: Session = Depends(get_db)):
 @router.get("/groups/", response_model=List[GroupResponse])
 def get_groups(db: Session = Depends(get_db)):
     return db.query(Group).all()
+
+# 5. API Gán User vào Nhóm (Add User to Group)
+@router.post("/users/{user_id}/groups/{group_id}", status_code=status.HTTP_200_OK)
+def assign_user_to_group(user_id: UUID, group_id: UUID, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User không tồn tại.")
+    
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group không tồn tại.")
+    
+    if group not in user.groups:
+        user.groups.append(group)
+        db.commit()
+    
+    return {"message": f"Đã gán User '{user.username}' vào Nhóm '{group.name}' thành công."}

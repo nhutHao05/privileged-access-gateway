@@ -20,12 +20,12 @@ class UserResponse(UserCreate):
 
 # --- GROUP SCHEMAS ---
 class GroupCreate(BaseModel):
+    keycloak_group_id: Optional[UUID] = None
     name: str
     description: Optional[str] = None
 
 class GroupResponse(GroupCreate):
     id: UUID
-    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

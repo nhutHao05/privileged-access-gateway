@@ -55,7 +55,7 @@
                     <select name="server_id" id="server_id" required>
                         {% for s in allowed_servers %}
                         <option value="{{ s.id }}">
-                            {{ s.name }} ({{ ", ".join(s.tags) }}) — tối đa {{ s.policy.max_duration_minutes }} phút
+                            {{ s.name }} ({{ ", ".join(s.tags or []) }}) — tối đa {{ s.policy.max_duration_minutes }} phút
                             {% if not s.policy.require_approval %}, tự động cấp{% endif %}
                         </option>
                         {% endfor %}

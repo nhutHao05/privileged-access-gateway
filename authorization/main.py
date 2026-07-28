@@ -56,7 +56,7 @@ def resolve_groups_for_roles(groups: list[dict], roles: list[str]) -> list[dict]
 oauth = OAuth()
 oauth.register(
     name="keycloak",
-    server_metadata_url="https://localhost/auth/realms/pam-realm/.well-known/openid-configuration",
+    server_metadata_url="https://52.55.177.7/auth/realms/pam-realm/.well-known/openid-configuration",
     client_id="pam-control-ui",
     client_kwargs={"scope": "openid profile email", "verify": False},
     # verify: False vì Keycloak đang chạy chứng chỉ SSL tự ký (self-signed),

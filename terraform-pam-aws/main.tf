@@ -69,10 +69,20 @@ resource "aws_security_group" "pam_sg" {
   }
 
   # Guacamole web UI - port 8080 (nếu cần truy cập trực tiếp để debug)
+  # HTTP - port 80 (redirect sang HTTPS)
   ingress {
-    description = "Guacamole web UI"
-    from_port   = 8080
-    to_port     = 8080
+    description = "HTTP for nginx redirect"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # HTTPS - port 443 (cong chinh vao Guacamole qua nginx)
+  ingress {
+    description = "HTTPS via nginx"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -95,7 +105,7 @@ resource "aws_security_group" "pam_sg" {
 # EC2 Instance
 # ---------------------------------------------------------------------------
 resource "aws_instance" "pam_server" {
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = "ami-0446f93cefa2981e5"  # ghim cung, khong auto-update nua
   instance_type          = var.instance_type
   key_name               = var.key_pair_name
   subnet_id              = data.aws_subnets.default.ids[0]

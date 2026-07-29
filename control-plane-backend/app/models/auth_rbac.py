@@ -37,11 +37,19 @@ class Server(Base):
     __tablename__ = 'servers'
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
-    ip = Column(String, nullable=False)
+    host = Column(String, nullable=False)
     port = Column(Integer, nullable=False)
     protocol = Column(String, nullable=False) # rdp | ssh | vnc
     guacamole_connection_id = Column(String, nullable=False)
     tags = Column(ARRAY(String), nullable=True)
+
+    @property
+    def ip(self):
+        return self.host
+
+    @ip.setter
+    def ip(self, value):
+        self.host = value
 
 class GroupServerPolicy(Base):
     __tablename__ = 'group_server_policy'

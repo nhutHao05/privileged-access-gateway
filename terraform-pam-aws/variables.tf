@@ -31,3 +31,8 @@ variable "project_name" {
   type        = string
   default     = "pam-gateway"
 }
+
+variable "team_ips_cidr" {
+  description = "Danh sach IP cua cac thanh vien trong nhom (dang x.x.x.x/32), duoc phep goi Control Plane API (port 8000)."
+  type        = list(string)
+}

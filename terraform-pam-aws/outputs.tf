@@ -17,3 +17,19 @@ output "guacamole_url" {
   description = "URL Guacamole web UI tu ben ngoai"
   value       = "http://${aws_eip.pam_eip.public_ip}:8080/guacamole"
 }
+
+output "demo_target_ip" {
+  description = "Public IP cua EC2 demo target (khong dung Elastic IP, co the doi neu stop/start)"
+  value       = aws_instance.demo_target.public_ip
+}
+
+output "demo_target_username" {
+  description = "Username SSH cua EC2 demo target"
+  value       = "ubuntu"
+}
+
+output "demo_target_password" {
+  description = "Password SSH cua EC2 demo target"
+  value       = random_password.demo_target_password.result
+  sensitive   = true
+}

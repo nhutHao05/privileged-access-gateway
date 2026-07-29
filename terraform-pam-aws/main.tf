@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -59,13 +63,13 @@ resource "aws_security_group" "pam_sg" {
     cidr_blocks = [var.my_ip_cidr]
   }
 
-  # Control Plane API (Inh) - port 8000, cho cả nhóm gọi vào
+ # Control Plane API (Inh) - port 8000, chi cho IP thanh vien nhom
   ingress {
-    description = "Control Plane API"
+    description = "Control Plane API - chi IP thanh vien nhom"
     from_port   = 8000
     to_port     = 8000
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # tạm mở rộng, có thể siết lại sau theo IP từng người
+    cidr_blocks = var.team_ips_cidr
   }
 
   # Guacamole web UI - port 8080 (nếu cần truy cập trực tiếp để debug)
@@ -104,6 +108,44 @@ resource "aws_security_group" "pam_sg" {
 # ---------------------------------------------------------------------------
 # EC2 Instance
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Security Group rieng cho EC2 demo target (Guacamole ket noi vao de demo)
+# ---------------------------------------------------------------------------
+resource "aws_security_group" "demo_target_sg" {
+  name        = "${var.project_name}-demo-target-sg"
+  description = "SG cho EC2 demo target - chi cho SSH tu server chinh (Guacamole) va tu may Nghia"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description     = "SSH tu server chinh, Guacamole dung de ket noi demo"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.pam_sg.id]
+  }
+
+  ingress {
+    description = "SSH tu may Nghia de setup/kiem tra ban dau"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr]
+  }
+
+  egress {
+    description = "Cho phep moi ket noi ra ngoai"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name    = "${var.project_name}-demo-target-sg"
+    Project = "PAM Gateway"
+  }
+}
+
 resource "aws_instance" "pam_server" {
   ami                    = "ami-0446f93cefa2981e5"  # ghim cung, khong auto-update nua
   instance_type          = var.instance_type
@@ -120,6 +162,43 @@ resource "aws_instance" "pam_server" {
 
   tags = {
     Name    = "${var.project_name}-server"
+    Project = "PAM Gateway"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# EC2 demo target - server "that" de demo cho mentor (khac voi target_vnc/
+# target_linux_ssh la container gia lap trong docker-compose)
+# ---------------------------------------------------------------------------
+resource "random_password" "demo_target_password" {
+  length  = 16
+  special = false # bo ky tu dac biet cho de doc/nhap khi demo truc tiep
+}
+
+resource "aws_instance" "demo_target" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = "t3.micro"
+  key_name               = var.key_pair_name
+  subnet_id               = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.demo_target_sg.id]
+
+  root_block_device {
+    volume_size = 8
+    volume_type = "gp3"
+  }
+
+  user_data = <<-EOF
+    #!/bin/bash
+    echo "ubuntu:${random_password.demo_target_password.result}" | chpasswd
+    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    if [ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]; then
+      sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+    fi
+    systemctl restart ssh
+  EOF
+
+  tags = {
+    Name    = "${var.project_name}-demo-target"
     Project = "PAM Gateway"
   }
 }

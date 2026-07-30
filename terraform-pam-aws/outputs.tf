@@ -14,8 +14,8 @@ output "control_plane_url" {
 }
 
 output "guacamole_url" {
-  description = "URL Guacamole web UI tu ben ngoai"
-  value       = "http://${aws_eip.pam_eip.public_ip}:8080/guacamole"
+  description = "URL Guacamole web UI tu ben ngoai (qua nginx reverse proxy, cert tu ky)"
+  value       = "https://${aws_eip.pam_eip.public_ip}"
 }
 
 output "demo_target_ip" {

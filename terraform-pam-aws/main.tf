@@ -125,11 +125,11 @@ resource "aws_security_group" "demo_target_sg" {
   }
 
   ingress {
-    description = "SSH tu may Nghia de setup/kiem tra ban dau"
+    description = "SSH tu IP thanh vien nhom de setup/kiem tra"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr]
+    cidr_blocks = var.team_ips_cidr
   }
 
   egress {

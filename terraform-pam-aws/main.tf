@@ -176,7 +176,7 @@ resource "random_password" "demo_target_password" {
 }
 
 resource "aws_instance" "demo_target" {
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = "ami-0446f93cefa2981e5" # ghim cung, tranh bi thay the khi AWS ra AMI moi
   instance_type          = "t3.micro"
   key_name               = var.key_pair_name
   subnet_id               = data.aws_subnets.default.ids[0]

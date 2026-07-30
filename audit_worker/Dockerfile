@@ -21,3 +21,4 @@ ENTRYPOINT []
 
 # Lệnh chạy Worker của Sang
 CMD ["python3", "worker.py"]
+HEALTHCHECK NONE

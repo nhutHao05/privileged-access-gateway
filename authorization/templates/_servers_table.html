@@ -39,7 +39,7 @@
                 <input
                     type="text"
                     name="tags"
-                    value="{{ s.tags | join(', ') }}"
+                    value="{{ (s.tags or []) | join(', ') }}"
                     placeholder="VD: prod, db"
                 />
             </td>
@@ -68,7 +68,7 @@
             <td>{{ s.name }}</td>
             <td>{{ s.ip or "—" }}</td>
             <td>
-                {% for tag in s.tags %}
+                {% for tag in s.tags or [] %}
                 <span class="tag-chip">{{ tag }}</span>
                 {% endfor %}
             </td>

@@ -50,6 +50,27 @@ def resolve_groups_for_roles(groups: list[dict], roles: list[str]) -> list[dict]
     return matched
 
 # ---------------------------------------------------------------------------
+# Siết quyền thao tác theo role (RBAC ở tầng route) — theo khung lưu ý trong
+# docs Chương 10: middleware trước đây chỉ check đăng nhập, chưa check role
+# cho 3/4 tab. Quy định: PAM-Admins + PAM-Support được thao tác (duyệt/từ
+# chối, sửa server, thu hồi quyền, sửa policy nhóm). PAM-Auditors và tài
+# khoản chưa có role PAM-* nào chỉ được xem (read-only) ở các tab đó.
+# ---------------------------------------------------------------------------
+
+MANAGE_ROLES = {"PAM-Admins", "PAM-Support"}
+
+PERMISSION_DENIED_MSG = (
+    "Bạn không có quyền thao tác này (chỉ PAM-Admins / PAM-Support). "
+    "Tài khoản của bạn hiện chỉ có quyền xem."
+)
+
+
+def _can_manage(request: Request) -> bool:
+    """True nếu user có role PAM-Admins hoặc PAM-Support."""
+    roles = request.session.get("roles", [])
+    return any(r in MANAGE_ROLES for r in roles)    
+
+# ---------------------------------------------------------------------------
 # Đăng nhập qua Keycloak (OIDC)
 # ---------------------------------------------------------------------------
 
@@ -364,6 +385,7 @@ async def request_access_page(request: Request, group_id: str | None = None):
             "access_requests": access_requests,
             "load_error": load_error,
             "role_warning": role_warning,
+            "can_manage": _can_manage(request),
         },
     )
 
@@ -396,17 +418,28 @@ async def submit_access_request(
     return templates.TemplateResponse(
         request,
         "_request_response.html",
-        {"error": error, "success": success, "access_requests": access_requests},
+        {
+            "error": error,
+            "success": success,
+            "access_requests": access_requests,
+            "can_manage": _can_manage(request),
+        },
     )
+
 
 
 @app.post("/access-requests/{request_id}/approve", response_class=HTMLResponse)
 async def approve_request_from_index(request: Request, request_id: str):
+    can_manage = _can_manage(request)
     error = None
-    try:
-        await api_client.review_access_request(request_id, status="approved")
-    except Exception as exc:
-        error = _error_message(exc)
+
+    if not can_manage:
+        error = PERMISSION_DENIED_MSG
+    else:
+        try:
+            await api_client.review_access_request(request_id, status="approved")
+        except Exception as exc:
+            error = _error_message(exc)
 
     servers = await api_client.get_servers()
     requests_raw = await api_client.list_access_requests()
@@ -415,17 +448,28 @@ async def approve_request_from_index(request: Request, request_id: str):
     return templates.TemplateResponse(
         request,
         "_request_response.html",
-        {"error": error, "success": None if error else "Đã duyệt yêu cầu.", "access_requests": access_requests},
+        {
+            "error": error,
+            "success": None if error else "Đã duyệt yêu cầu.",
+            "access_requests": access_requests,
+            "can_manage": can_manage,
+        },
+        status_code=403 if not can_manage else 200,
     )
 
 
 @app.post("/access-requests/{request_id}/reject", response_class=HTMLResponse)
 async def reject_request_from_index(request: Request, request_id: str):
+    can_manage = _can_manage(request)
     error = None
-    try:
-        await api_client.review_access_request(request_id, status="rejected")
-    except Exception as exc:
-        error = _error_message(exc)
+
+    if not can_manage:
+        error = PERMISSION_DENIED_MSG
+    else:
+        try:
+            await api_client.review_access_request(request_id, status="rejected")
+        except Exception as exc:
+            error = _error_message(exc)
 
     servers = await api_client.get_servers()
     requests_raw = await api_client.list_access_requests()
@@ -434,7 +478,13 @@ async def reject_request_from_index(request: Request, request_id: str):
     return templates.TemplateResponse(
         request,
         "_request_response.html",
-        {"error": error, "success": None if error else "Đã từ chối yêu cầu.", "access_requests": access_requests},
+        {
+            "error": error,
+            "success": None if error else "Đã từ chối yêu cầu.",
+            "access_requests": access_requests,
+            "can_manage": can_manage,
+        },
+        status_code=403 if not can_manage else 200,
     )
 # ---------------------------------------------------------------------------
 # Tab 2: Quản lý server (Server Management — chỉ Edit)
@@ -452,7 +502,7 @@ async def servers_page(request: Request):
     return templates.TemplateResponse(
         request,
         "servers.html",
-        {"servers": servers, "editing_id": None, "error": error},
+        {"servers": servers, "editing_id": None, "error": error, "can_manage": _can_manage(request)},
     )
 
 
@@ -468,12 +518,13 @@ async def servers_table_partial(request: Request):
     return templates.TemplateResponse(
         request,
         "_servers_table.html",
-        {"servers": servers, "editing_id": None, "error": error},
+        {"servers": servers, "editing_id": None, "error": error, "can_manage": _can_manage(request)},
     )
 
 
 @app.get("/servers/{server_id}/edit-row", response_class=HTMLResponse)
 async def edit_server_row(request: Request, server_id: str):
+    can_manage = _can_manage(request)
     error = None
     servers = []
     try:
@@ -481,10 +532,21 @@ async def edit_server_row(request: Request, server_id: str):
     except Exception as exc:
         error = _error_message(exc)
 
+    if not can_manage:
+        error = error or PERMISSION_DENIED_MSG
+
     return templates.TemplateResponse(
         request,
         "_servers_table.html",
-        {"servers": servers, "editing_id": server_id, "error": error},
+        {
+            "servers": servers,
+            # Không cho mở form sửa nếu không có quyền — Auditor bấm "Sửa"
+            # (nút vốn đã ẩn ở UI) cũng chỉ nhận lại bảng chỉ-xem + báo lỗi.
+            "editing_id": server_id if can_manage else None,
+            "error": error,
+            "can_manage": can_manage,
+        },
+        status_code=403 if not can_manage else 200,
     )
 
 
@@ -496,15 +558,19 @@ async def edit_server(
     ip: str = Form(None),
     tags: str = Form(None),
 ):
+    can_manage = _can_manage(request)
     error = None
     success = None
     tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
-    try:
-        await api_client.update_server(server_id, name=name, ip=ip, tags=tags_list)
-        success = "Cập nhật server thành công!"
-    except Exception as exc:
-        error = _error_message(exc)
+    if not can_manage:
+        error = PERMISSION_DENIED_MSG
+    else:
+        try:
+            await api_client.update_server(server_id, name=name, ip=ip, tags=tags_list)
+            success = "Cập nhật server thành công!"
+        except Exception as exc:
+            error = _error_message(exc)
 
     servers = await api_client.get_servers()
 
@@ -516,7 +582,9 @@ async def edit_server(
             "editing_id": None,
             "error": error,
             "success": success,
+            "can_manage": can_manage,
         },
+        status_code=403 if not can_manage else 200,
     )
 
 
@@ -569,7 +637,9 @@ async def active_grants_page(request: Request):
         print(f"=== [DEBUG active-grants] === {error}")
 
     return templates.TemplateResponse(
-        request, "active_grants.html", {"grants": grants_display, "error": error},
+        request,
+        "active_grants.html",
+        {"grants": grants_display, "error": error, "can_manage": _can_manage(request)},
     )
 
 
@@ -583,17 +653,24 @@ async def active_grants_table_partial(request: Request):
         error = _error_message(exc)
 
     return templates.TemplateResponse(
-        request, "_active_grants_table.html", {"grants": grants_display, "error": error},
+        request,
+        "_active_grants_table.html",
+        {"grants": grants_display, "error": error, "can_manage": _can_manage(request)},
     )
 
 
 @app.post("/active-grants/{grant_id}/revoke", response_class=HTMLResponse)
 async def revoke_grant_route(request: Request, grant_id: str):
+    can_manage = _can_manage(request)
     error = None
-    try:
-        await api_client.revoke_grant(grant_id)
-    except Exception as exc:
-        error = _error_message(exc)
+
+    if not can_manage:
+        error = PERMISSION_DENIED_MSG
+    else:
+        try:
+            await api_client.revoke_grant(grant_id)
+        except Exception as exc:
+            error = _error_message(exc)
 
     grants_display = []
     try:
@@ -602,7 +679,10 @@ async def revoke_grant_route(request: Request, grant_id: str):
         error = error or _error_message(exc2)
 
     return templates.TemplateResponse(
-        request, "_active_grants_table.html", {"grants": grants_display, "error": error},
+        request,
+        "_active_grants_table.html",
+        {"grants": grants_display, "error": error, "can_manage": can_manage},
+        status_code=403 if not can_manage else 200,
     )
 
 # ---------------------------------------------------------------------------

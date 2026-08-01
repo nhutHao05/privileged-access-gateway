@@ -73,6 +73,7 @@
                 {% endfor %}
             </td>
             <td>
+                {% if can_manage %}
                 <button
                     class="btn-small btn-edit"
                     hx-get="/servers/{{ s.id }}/edit-row"
@@ -81,6 +82,7 @@
                 >
                     Sửa
                 </button>
+                {% endif %}
             </td>
         </tr>
         {% endif %}

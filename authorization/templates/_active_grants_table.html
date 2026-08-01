@@ -1,3 +1,6 @@
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
 {% if not grants %}
 <p class="empty">Chưa có quyền nào được duyệt.</p>
 {% else %}
@@ -33,7 +36,7 @@
                 {% endif %}
             </td>
             <td>
-                {% if g.grant_status == "active" %}
+                {% if g.grant_status == "active" and can_manage %}
                 <button
                     class="btn-small btn-reject"
                     hx-post="/active-grants/{{ g.id }}/revoke"

@@ -708,6 +708,7 @@ async def groups_page(request: Request):
             "groups": group_matrix,
             "error": error,
             "success": None,
+            "can_manage": _can_manage(request),
         },
     )
 

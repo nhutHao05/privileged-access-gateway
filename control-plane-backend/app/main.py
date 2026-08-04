@@ -1,8 +1,13 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from app.core.config import settings
 from app.core.scheduler import scheduler
 from app.routers import server, user_group, policy, access, audit
+
+BASE_DIR = Path(__file__).resolve().parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +37,14 @@ app.include_router(user_group.router)
 app.include_router(policy.router)
 app.include_router(access.router)
 app.include_router(audit.router)
+
+# Serve static assets (CSS, JS)
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+# Admin Dashboard UI — Truy cập tại http://HOST:8000/ui
+@app.get("/ui", include_in_schema=False)
+def admin_dashboard():
+    return FileResponse(str(BASE_DIR / "templates" / "index.html"))
 
 @app.get("/")
 def read_root():

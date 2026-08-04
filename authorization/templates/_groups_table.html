@@ -25,7 +25,7 @@
             <tr>
                 <td>{{ sp.server_name }}</td>
                 <td class="checkbox-cell">
-                    <input type="checkbox" name="enabled" {% if sp.enabled %}checked{% endif %} />
+                    <input type="checkbox" name="enabled" {% if sp.enabled %}checked{% endif %} {% if not can_manage %}disabled{% endif %} />
                 </td>
                 <td>
                     <input
@@ -34,6 +34,7 @@
                         min="5"
                         max="480"
                         value="{{ sp.max_duration_minutes }}"
+                        {% if not can_manage %}disabled{% endif %}
                     />
                 </td>
                 <td class="checkbox-cell">
@@ -41,9 +42,11 @@
                         type="checkbox"
                         name="requires_approval"
                         {% if sp.require_approval %}checked{% endif %}
+                        {% if not can_manage %}disabled{% endif %}
                     />
                 </td>
                 <td>
+                    {% if can_manage %}
                     <button
                         class="btn-small btn-approve"
                         hx-post="/groups/{{ g.id }}/servers/{{ sp.server_id }}/policy"
@@ -53,6 +56,7 @@
                     >
                         Lưu
                     </button>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}

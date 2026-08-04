@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PAM Gateway — Admin Dashboard for Privileged Access Management">
+    <title>PAM Gateway — Admin Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- SIDEBAR -->
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-icon">🛡️</span>
+                <div class="logo-text">
+                    <h1>PAM Gateway</h1>
+                    <span>Control Plane</span>
+                </div>
+            </div>
+        </div>
+        <ul class="nav-links">
+            <li><a href="#dashboard" class="nav-link active" data-page="dashboard"><span class="nav-icon">📊</span> Dashboard</a></li>
+            <li class="nav-section">Quản lý hệ thống</li>
+            <li><a href="#users" class="nav-link" data-page="users"><span class="nav-icon">👤</span> Người dùng</a></li>
+            <li><a href="#groups" class="nav-link" data-page="groups"><span class="nav-icon">👥</span> Nhóm</a></li>
+            <li><a href="#servers" class="nav-link" data-page="servers"><span class="nav-icon">🖥️</span> Máy chủ</a></li>
+            <li><a href="#policies" class="nav-link" data-page="policies"><span class="nav-icon">🔐</span> Chính sách</a></li>
+            <li class="nav-section">Quản lý truy cập</li>
+            <li><a href="#requests" class="nav-link" data-page="requests"><span class="nav-icon">📋</span> Xin quyền</a></li>
+            <li><a href="#approvals" class="nav-link" data-page="approvals"><span class="nav-icon">✅</span> Phê duyệt</a></li>
+            <li><a href="#grants" class="nav-link" data-page="grants"><span class="nav-icon">⚡</span> Quyền hoạt động</a></li>
+            <li class="nav-section">Kiểm toán</li>
+            <li><a href="#audit" class="nav-link" data-page="audit"><span class="nav-icon">📊</span> Audit Trail</a></li>
+        </ul>
+        <div class="sidebar-footer">
+            <div class="version-info">v1.0 — RBAC Engine</div>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content" id="mainContent">
+        <header class="top-bar">
+            <button class="menu-toggle" id="menuToggle">☰</button>
+            <h2 class="page-title" id="pageTitle">Dashboard</h2>
+            <div class="top-bar-actions">
+                <span class="status-badge online">● Hệ thống hoạt động</span>
+            </div>
+        </header>
+        <div class="content-area" id="contentArea">
+            <!-- Dynamic content rendered here by JS -->
+        </div>
+    </main>
+
+    <!-- MODAL -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal" id="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">Xác nhận</h3>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer" id="modalFooter"></div>
+        </div>
+    </div>
+
+    <!-- TOAST -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

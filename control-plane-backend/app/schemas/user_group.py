@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from uuid import UUID  # <-- BỔ SUNG DÒNG NÀY LÊN ĐẦU FILE
 
 # --- USER SCHEMAS ---
 class UserCreate(BaseModel):
     username: str
-    email: str
+    email: Optional[str] = None
     full_name: Optional[str] = None
 
 class UserResponse(UserCreate):
@@ -19,6 +19,13 @@ class UserResponse(UserCreate):
         populate_by_name = True
 
 # --- GROUP SCHEMAS ---
+class UserBrief(BaseModel):
+    id: UUID
+    username: str
+    email: Optional[str] = None
+    class Config:
+        from_attributes = True
+
 class GroupCreate(BaseModel):
     keycloak_group_id: Optional[UUID] = None
     name: str
@@ -26,6 +33,7 @@ class GroupCreate(BaseModel):
 
 class GroupResponse(GroupCreate):
     id: UUID
+    users: List[UserBrief] = []
 
     class Config:
-        from_attributes = True
+        from_attributes = True

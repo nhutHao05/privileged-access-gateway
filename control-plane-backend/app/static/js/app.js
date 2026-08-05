@@ -91,11 +91,11 @@ const pages = {
     groups: { title: 'Quản lý Nhóm', render: renderGroups },
     servers: { title: 'Quản lý Máy chủ', render: renderServers },
     policies: { title: 'Chính sách Phân quyền', render: renderPolicies },
-    requests: { title: 'Cấp Quyền Trực Tiếp (Admin Grant)', render: renderRequests },
     approvals: { title: 'Phê Duyệt Yêu Cầu Xin Quyền', render: renderApprovals },
     grants: { title: 'Quyền Đang Hoạt Động', render: renderGrants },
     audit: { title: 'Audit Trail', render: renderAudit }
 };
+
 
 
 async function navigate() {

@@ -440,6 +440,14 @@ window.reviewRequest = async function(id, status) {
     } catch (e) { toast(e.message, 'error'); }
 };
 
+window.revokeGrant = async function(id) {
+    if (!confirm('Bạn có chắc muốn THU HỒI quyền này ngay lập tức?')) return;
+    try {
+        await api('POST', `/access/grants/${id}/revoke`);
+        toast('Đã thu hồi quyền truy cập thành công!', 'success'); navigate();
+    } catch (e) { toast(e.message, 'error'); }
+};
+
 // ── PAGE: Active Grants ──────────────────────
 function renderGrants() {
     const el = document.getElementById('contentArea');
@@ -450,9 +458,11 @@ function renderGrants() {
                 ${_grants.length === 0 ? '<div class="empty-state"><div class="empty-icon">🔒</div><p>Không có quyền nào đang hoạt động</p></div>' : `
                 <table><thead><tr><th>Người dùng</th><th>Máy chủ</th><th>Cấp quyền lúc</th><th>Hết hạn lúc</th><th>Thời gian còn lại</th><th>Hành động</th></tr></thead>
                 <tbody>${_grants.map(g => {
-                    const remaining = new Date(g.expires_at) - new Date();
-                    const mins = Math.max(0, Math.floor(remaining / 60000));
-                    const secs = Math.max(0, Math.floor((remaining % 60000) / 1000));
+                    const expStr = g.expires_at.endsWith('Z') ? g.expires_at : g.expires_at + 'Z';
+                    const remaining = new Date(expStr) - new Date();
+                    const totalSecs = Math.max(0, Math.floor(remaining / 1000));
+                    const mins = Math.floor(totalSecs / 60);
+                    const secs = totalSecs % 60;
                     const urgent = mins < 1;
                     return `<tr>
                         <td><strong>${userName(g.user_id)}</strong></td>
@@ -466,19 +476,11 @@ function renderGrants() {
             </div>
         </div>
     `;
-    // Auto refresh every 5s
     if (_grants.length > 0) {
-        setTimeout(() => { if (location.hash === '#grants') navigate(); }, 5000);
+        setTimeout(() => { if (location.hash === '#grants') navigate(); }, 1000);
     }
 }
 
-window.revokeGrant = async function(id) {
-    if (!confirm('Bạn có chắc muốn THU HỒI quyền này ngay lập tức?')) return;
-    try {
-        await api('POST', `/access/grants/${id}/revoke`);
-        toast('Đã thu hồi quyền truy cập thành công!', 'success'); navigate();
-    } catch (e) { toast(e.message, 'error'); }
-};
 
 // ── PAGE: Audit Trail ────────────────────────
 function renderAudit() {

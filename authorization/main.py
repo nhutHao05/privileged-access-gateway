@@ -112,6 +112,11 @@ app.add_middleware(AuthMiddleware)
 app.add_middleware(SessionMiddleware, secret_key="doi-chuoi-nay-thanh-ngau-nhien-truoc-khi-deploy-that")
 
 
+def _redirect_uri(request: Request) -> str:
+    """Tự lấy đúng host đang truy cập (localhost/LAN/Tailscale), không hardcode."""
+    return f"{request.base_url}auth/callback"
+
+
 @app.get("/login")
 async def login(request: Request):
     metadata = await oauth.keycloak.load_server_metadata()
@@ -123,7 +128,7 @@ async def login(request: Request):
     params = {
         "response_type": "code",
         "client_id": "pam-control-ui",
-        "redirect_uri": "http://localhost:8001/auth/callback",
+        "redirect_uri": _redirect_uri(request),
         "scope": "openid profile email",
         "state": state,
     }
@@ -148,7 +153,7 @@ async def auth_callback(request: Request):
             data={
                 "grant_type": "authorization_code",
                 "code": code,
-                "redirect_uri": "http://localhost:8001/auth/callback",
+                "redirect_uri": _redirect_uri(request),
                 "client_id": "pam-control-ui",
             },
         )
@@ -215,7 +220,7 @@ async def logout(request: Request):
     params = {
         "id_token_hint": id_token,
         "client_id": "pam-control-ui",
-        "post_logout_redirect_uri": "http://localhost:8001/login",
+        "post_logout_redirect_uri": f"{request.base_url}login",
     }
     return RedirectResponse(url=f"{end_session_endpoint}?{urlencode(params)}")
 

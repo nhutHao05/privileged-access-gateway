@@ -91,11 +91,12 @@ const pages = {
     groups: { title: 'Quản lý Nhóm', render: renderGroups },
     servers: { title: 'Quản lý Máy chủ', render: renderServers },
     policies: { title: 'Chính sách Phân quyền', render: renderPolicies },
-    requests: { title: 'Xin Quyền Truy Cập', render: renderRequests },
-    approvals: { title: 'Phê Duyệt Yêu Cầu', render: renderApprovals },
+    requests: { title: 'Cấp Quyền Trực Tiếp (Admin Grant)', render: renderRequests },
+    approvals: { title: 'Phê Duyệt Yêu Cầu Xin Quyền', render: renderApprovals },
     grants: { title: 'Quyền Đang Hoạt Động', render: renderGrants },
     audit: { title: 'Audit Trail', render: renderAudit }
 };
+
 
 async function navigate() {
     const hash = location.hash.slice(1) || 'dashboard';
@@ -355,28 +356,28 @@ window.deletePolicy = async function(id) {
     try { await api('DELETE', `/policy/group-server/${id}`); toast('Đã xóa chính sách.', 'success'); navigate(); } catch (e) { toast(e.message, 'error'); }
 };
 
-// ── PAGE: Requests (Xin quyền) ───────────────
+// ── PAGE: Admin Grant (Cấp quyền trực tiếp) ──
 function renderRequests() {
     const el = document.getElementById('contentArea');
     el.innerHTML = `
         <div class="card" style="margin-bottom:16px;">
-            <div class="card-header"><h3>📋 Gửi Yêu Cầu Truy Cập</h3></div>
+            <div class="card-header"><h3>⚡ Cấp Quyền Trực Tiếp Cho User (Admin Direct Grant)</h3></div>
             <div class="card-body">
                 <div class="form-row">
-                    <div class="form-group"><label>Người dùng</label><select class="form-control" id="reqUser">${_users.map(u => `<option value="${u.id}">${u.username}${u.full_name ? ' — ' + u.full_name : ''}</option>`).join('')}</select></div>
-                    <div class="form-group"><label>Máy chủ cần truy cập</label><select class="form-control" id="reqServer">${_servers.map(s => `<option value="${s.id}">${s.name} (${s.protocol.toUpperCase()} :${s.port})</option>`).join('')}</select></div>
+                    <div class="form-group"><label>Chọn Người dùng được cấp quyền</label><select class="form-control" id="reqUser">${_users.map(u => `<option value="${u.id}">${u.username}${u.full_name ? ' — ' + u.full_name : ''}</option>`).join('')}</select></div>
+                    <div class="form-group"><label>Máy chủ mục tiêu</label><select class="form-control" id="reqServer">${_servers.map(s => `<option value="${s.id}">${s.name} (${s.protocol.toUpperCase()} :${s.port})</option>`).join('')}</select></div>
                 </div>
                 <div class="form-row">
-                    <div class="form-group"><label>Thời lượng (phút)</label><input class="form-control" id="reqMinutes" type="number" value="30" min="1" max="480"></div>
-                    <div class="form-group"><label>Lý do</label><input class="form-control" id="reqReason" placeholder="VD: Bảo trì hệ thống"></div>
+                    <div class="form-group"><label>Thời lượng JIT Access (phút)</label><input class="form-control" id="reqMinutes" type="number" value="30" min="1" max="480"></div>
+                    <div class="form-group"><label>Ghi chú / Lý do cấp quyền</label><input class="form-control" id="reqReason" placeholder="VD: Cấp quyền Admin bảo trì hệ thống khẩn cấp"></div>
                 </div>
-                <button class="btn btn-primary" onclick="createRequest()">🔑 Gửi yêu cầu</button>
+                <button class="btn btn-primary" onclick="createRequest()">⚡ Cấp Quyền Ngay</button>
             </div>
         </div>
         <div class="card">
-            <div class="card-header"><h3>📃 Lịch sử Yêu cầu (${_requests.length})</h3></div>
+            <div class="card-header"><h3>📃 Lịch sử Yêu cầu & Cấp quyền (${_requests.length})</h3></div>
             <div class="card-body table-wrapper">
-                <table><thead><tr><th>Người dùng</th><th>Máy chủ</th><th>Thời lượng</th><th>Lý do</th><th>Trạng thái</th><th>Thời gian gửi</th></tr></thead>
+                <table><thead><tr><th>Người dùng</th><th>Máy chủ</th><th>Thời lượng</th><th>Lý do / Ghi chú</th><th>Trạng thái</th><th>Thời gian</th></tr></thead>
                 <tbody>${_requests.slice().reverse().map(r => `<tr>
                     <td><strong>${userName(r.user_id)}</strong></td>
                     <td>${serverName(r.server_id)}</td>
@@ -389,6 +390,7 @@ function renderRequests() {
         </div>
     `;
 }
+
 
 window.createRequest = async function() {
     try {

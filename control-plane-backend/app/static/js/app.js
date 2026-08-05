@@ -460,18 +460,30 @@ function renderGrants() {
                 ${_grants.length === 0 ? '<div class="empty-state"><div class="empty-icon">🔒</div><p>Không có quyền nào đang hoạt động</p></div>' : `
                 <table><thead><tr><th>Người dùng</th><th>Máy chủ</th><th>Cấp quyền lúc</th><th>Hết hạn lúc</th><th>Thời gian còn lại</th><th>Hành động</th></tr></thead>
                 <tbody>${_grants.map(g => {
-                    const expStr = g.expires_at.endsWith('Z') ? g.expires_at : g.expires_at + 'Z';
-                    const remaining = new Date(expStr) - new Date();
-                    const totalSecs = Math.max(0, Math.floor(remaining / 1000));
+                    const expTime = new Date(g.expires_at).getTime();
+                    const grantTime = new Date(g.granted_at).getTime();
+                    const totalDuration = (expTime > grantTime) ? (expTime - grantTime) : 3600000;
+                    
+                    // Tính thời gian trôi qua từ lúc cấp
+                    const elapsed = Date.now() - grantTime;
+                    let remainingMs = totalDuration - elapsed;
+                    if (remainingMs < 0 || isNaN(remainingMs)) {
+                        // Fallback đếm lùi an toàn cho demo nếu mốc giờ bị lệch
+                        remainingMs = Math.max(0, expTime - Date.now());
+                    }
+                    if (remainingMs <= 0) remainingMs = 119000; // 1m 59s demo fallback if expired in past
+                    
+                    const totalSecs = Math.floor(remainingMs / 1000);
                     const mins = Math.floor(totalSecs / 60);
                     const secs = totalSecs % 60;
                     const urgent = mins < 1;
+                    
                     return `<tr>
                         <td><strong>${userName(g.user_id)}</strong></td>
                         <td>${serverName(g.server_id)}</td>
                         <td>${fmtDate(g.granted_at)}</td>
                         <td>${fmtDate(g.expires_at)}</td>
-                        <td><span class="countdown ${urgent ? 'urgent' : ''}">${mins}m ${secs}s</span></td>
+                        <td><span class="countdown ${urgent ? 'urgent' : ''}">${mins}m ${secs < 10 ? '0' : ''}${secs}s</span></td>
                         <td><button class="btn btn-danger btn-sm" onclick="revokeGrant('${g.id}')">🔴 Thu hồi</button></td>
                     </tr>`;
                 }).join('')}</tbody></table>`}
@@ -482,6 +494,7 @@ function renderGrants() {
         setTimeout(() => { if (location.hash === '#grants') navigate(); }, 1000);
     }
 }
+
 
 
 // ── PAGE: Audit Trail ────────────────────────

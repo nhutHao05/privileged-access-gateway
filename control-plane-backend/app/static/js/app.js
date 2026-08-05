@@ -394,15 +394,28 @@ function renderRequests() {
 
 window.createRequest = async function() {
     try {
-        await api('POST', '/access/requests/', {
-            user_id: document.getElementById('reqUser').value,
-            server_id: document.getElementById('reqServer').value,
-            requested_minutes: parseInt(document.getElementById('reqMinutes').value),
-            reason: document.getElementById('reqReason').value
+        const userId = document.getElementById('reqUser').value;
+        const serverId = document.getElementById('reqServer').value;
+        const minutes = parseInt(document.getElementById('reqMinutes').value);
+        const reason = document.getElementById('reqReason').value || 'Admin Direct Grant';
+
+        // 1. Tạo request mới
+        const req = await api('POST', '/access/requests/', {
+            user_id: userId,
+            server_id: serverId,
+            requested_minutes: minutes,
+            reason: reason
         });
-        toast('Đã gửi yêu cầu truy cập thành công!', 'success'); navigate();
+
+        // 2. Tự động Phê duyệt ngay lập tức (Direct Grant workflow)
+        await api('POST', `/access/requests/${req.id}/review`, { status: 'approved' });
+
+        toast('⚡ Đã cấp quyền trực tiếp thành công! Quyền truy cập đã có hiệu lực trên Guacamole.', 'success');
+        location.hash = '#grants'; // Chuyển thẳng sang trang Quyền đang hoạt động
+        navigate();
     } catch (e) { toast(e.message, 'error'); }
 };
+
 
 // ── PAGE: Approvals ──────────────────────────
 function renderApprovals() {

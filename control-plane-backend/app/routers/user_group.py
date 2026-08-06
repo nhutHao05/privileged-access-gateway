@@ -79,21 +79,16 @@ def assign_user_to_group(user_id: UUID, group_id: UUID, db: Session = Depends(ge
     return {"message": f"Đã gán User '{user.username}' vào Nhóm '{group.name}' thành công."}
 
 # 7. Xóa User khỏi Nhóm
-@router.delete("/users/{user_id}/groups/{group_id}", status_code=status.HTTP_200_OK)
+@router.delete("/users/{user_id}/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_user_from_group(user_id: UUID, group_id: UUID, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User không tồn tại.")
-
     group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="Group không tồn tại.")
-
+    if not user or not group:
+        raise HTTPException(status_code=404, detail="Không tìm thấy User hoặc Group.")
     if group in user.groups:
         user.groups.remove(group)
         db.commit()
-
-    return {"message": f"Đã xóa User '{user.username}' khỏi Nhóm '{group.name}'."}
+    return None
 
 # 8. Xóa Group
 @router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)

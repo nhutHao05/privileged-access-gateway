@@ -390,3 +390,9 @@ async def remove_user_from_group(user_id: str, group_id: str) -> None:
     if USE_MOCK:
         return
     await _request("DELETE", f"/auth/users/{user_id}/groups/{group_id}")
+
+async def get_audit_sessions() -> list[dict]:
+    """GET {BASE_URL}/audit/sessions/ — lịch sử session: user, server, thời gian, trạng thái."""
+    if USE_MOCK:
+        return []
+    return await _request("GET", "/audit/sessions/")

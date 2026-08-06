@@ -1015,3 +1015,55 @@ async def remove_user_from_group_route(request: Request, group_id: str, user_id:
             "is_admin": True,
         },
     )
+
+def attach_audit_display(a: dict, servers: list[dict], users: list[dict]) -> dict:
+    server = next((s for s in servers if s["id"] == a.get("server_id")), None)
+    user = next((u for u in users if u["id"] == a.get("user_id")), None)
+    return {
+        **a,
+        "server_name": server["name"] if server else a.get("server_id"),
+        "username": user["username"] if user else a.get("user_id"),
+        "started_at": _parse_dt(a.get("start_time")),
+        "ended_at": _parse_dt(a.get("end_time")),
+    }
+
+
+@app.get("/audit-log", response_class=HTMLResponse)
+async def audit_log_page(request: Request):
+    if not is_admin(request):
+        return RedirectResponse(url="/portal")
+
+    error = None
+    audit_display = []
+    try:
+        sessions = await api_client.get_audit_sessions()
+        servers = await api_client.get_servers()
+        users = await api_client.get_users()
+        audit_display = [attach_audit_display(a, servers, users) for a in reversed(sessions)]
+    except Exception as exc:
+        error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "audit_log.html",
+        {"audit_sessions": audit_display, "error": error, "is_admin": True},
+    )
+
+
+@app.get("/audit-log/table", response_class=HTMLResponse)
+async def audit_log_table_partial(request: Request):
+    error = None
+    audit_display = []
+    try:
+        sessions = await api_client.get_audit_sessions()
+        servers = await api_client.get_servers()
+        users = await api_client.get_users()
+        audit_display = [attach_audit_display(a, servers, users) for a in reversed(sessions)]
+    except Exception as exc:
+        error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "_audit_log_table.html",
+        {"audit_sessions": audit_display, "error": error, "is_admin": True},
+    )

@@ -276,7 +276,7 @@ def build_group_matrix(groups, servers, policies):
                 server_policies.append({
                     "server_id": s["id"],
                     "server_name": s["name"],
-                    "enabled": p.get("enabled", False),
+                    "enabled": True, 
                     "max_duration_minutes": p.get("max_duration_minutes", 60),
                     "require_approval": p.get("require_approval", True),
                     "policy_id": p["id"],  # để xóa nếu cần
@@ -967,3 +967,51 @@ async def delete_policy_route(request: Request, policy_id: str):
         )
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": _error_message(exc)})
+
+@app.delete("/groups/{group_id}")
+async def delete_group_route(request: Request, group_id: str):
+    if not is_admin(request):
+        return JSONResponse(status_code=403, content={"error": "Chỉ Admin mới được xóa Group."})
+    error = None
+    try:
+        await api_client.delete_group_backend(group_id)
+    except Exception as exc:
+        error = _error_message(exc)
+
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+    return templates.TemplateResponse(
+        request,
+        "_groups_table.html",
+        {
+            "groups": build_group_matrix(groups, servers, policies),
+            "error": error,
+            "success": None if error else "Đã xóa group.",
+            "is_admin": True,
+        },
+    )
+
+@app.delete("/groups/{group_id}/users/{user_id}")
+async def remove_user_from_group_route(request: Request, group_id: str, user_id: str):
+    if not is_admin(request):
+        return JSONResponse(status_code=403, content={"error": "Chỉ Admin mới được gỡ user."})
+    error = None
+    try:
+        await api_client.remove_user_from_group(user_id, group_id)
+    except Exception as exc:
+        error = _error_message(exc)
+
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+    return templates.TemplateResponse(
+        request,
+        "_groups_table.html",
+        {
+            "groups": build_group_matrix(groups, servers, policies),
+            "error": error,
+            "success": None if error else "Đã gỡ user khỏi group.",
+            "is_admin": True,
+        },
+    )

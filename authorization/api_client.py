@@ -378,3 +378,15 @@ async def delete_group_server_policy(policy_id: str) -> dict:
     if USE_MOCK:
         return {"message": "mock ok"}
     return await _request("DELETE", f"/policy/group-server/{policy_id}")
+
+async def delete_group_backend(group_id: str) -> None:
+    """DELETE {BASE_URL}/auth/groups/{group_id}"""
+    if USE_MOCK:
+        return
+    await _request("DELETE", f"/auth/groups/{group_id}")
+
+async def remove_user_from_group(user_id: str, group_id: str) -> None:
+    """DELETE {BASE_URL}/auth/users/{user_id}/groups/{group_id}"""
+    if USE_MOCK:
+        return
+    await _request("DELETE", f"/auth/users/{user_id}/groups/{group_id}")

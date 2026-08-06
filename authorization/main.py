@@ -17,6 +17,8 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 import api_client
 
@@ -550,24 +552,23 @@ async def edit_server(
     server_id: str,
     name: str = Form(None),
     ip: str = Form(None),
+    protocol: str = Form(None),
     tags: str = Form(None),
 ):
     can_manage = is_admin(request)
     error = None
     success = None
     tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-
     if not can_manage:
         error = "Bạn không có quyền (chỉ Admin)."
     else:
         try:
-            await api_client.update_server(server_id, name=name, ip=ip, tags=tags_list)
+            await api_client.update_server(server_id, name=name, ip=ip, protocol=protocol, tags=tags_list)
             success = "Cập nhật server thành công!"
         except Exception as exc:
             error = _error_message(exc)
 
     servers = await api_client.get_servers()
-
     return templates.TemplateResponse(
         request,
         "_servers_table.html",
@@ -575,7 +576,6 @@ async def edit_server(
             "servers": servers,
             "editing_id": None,
             "error": error,
-            "success": success,
             "is_admin": can_manage,
         },
         status_code=403 if not can_manage else 200,
@@ -722,11 +722,13 @@ async def groups_page(request: Request):
 
     error = None
     group_matrix = []
+    users = []
     try:
         groups = await api_client.get_groups()
         servers = await api_client.get_servers()
         policies = await api_client.list_group_server_policies()
         group_matrix = build_group_matrix(groups, servers, policies)
+        users = await api_client.get_users()
     except Exception as exc:
         error = _error_message(exc)
 
@@ -735,6 +737,7 @@ async def groups_page(request: Request):
         "groups.html",
         {
             "groups": group_matrix,
+            "users": users,
             "error": error,
             "success": None,
             "is_admin": is_admin(request),
@@ -784,7 +787,6 @@ async def create_user_route(
     email: str = Form(None),
     full_name: str = Form(None),
     temp_password: str = Form(...),
-    group_id: str = Form(None),
 ):
     error = None
     success = None
@@ -796,35 +798,55 @@ async def create_user_route(
             kc_user_id = await keycloak_admin.create_user(
                 username, email, full_name, temp_password
             )
-            cp_user = await api_client.create_user_backend(
-    username, email, full_name, keycloak_sub=kc_user_id
-)
-
-            if group_id:
-                groups = await api_client.get_groups()
-                group = next((g for g in groups if g["id"] == group_id), None)
-                if group:
-                    await keycloak_admin.assign_realm_role_to_user(kc_user_id, group["name"])
-                    await api_client.assign_user_to_group(cp_user["id"], group_id)
-
-            success = f"Đã tạo user '{username}' thành công (password tạm, bắt buộc đổi khi đăng nhập lần đầu)."
+            await api_client.create_user_backend(
+                username, email, full_name, keycloak_sub=kc_user_id
+            )
+            success = f"Đã tạo user '{username}'. Xuống 'Danh sách User' để gán vào group."
         except Exception as exc:
             error = _error_message(exc)
 
+    users = await api_client.get_users()
     groups = await api_client.get_groups()
-    servers = await api_client.get_servers()
-    policies = await api_client.list_group_server_policies()
 
     return templates.TemplateResponse(
         request,
-        "_groups_table.html",
+        "_users_table.html",
         {
-            "groups": build_group_matrix(groups, servers, policies),
+            "users": users,
+            "groups": groups,
             "error": error,
             "success": success,
+            "is_admin": is_admin(request),
         },
     )
 
+@app.post("/users/{user_id}/assign-group", response_class=HTMLResponse)
+async def assign_user_to_group_route(request: Request, user_id: str, group_id: str = Form(...)):
+    if not is_admin(request):
+        return JSONResponse(status_code=403, content={"error": "Chỉ Admin mới được gán user vào group."})
+
+    error = None
+    success = None
+    try:
+        await api_client.assign_user_to_group(user_id, group_id)
+        success = "Đã gán user vào group."
+    except Exception as exc:
+        error = _error_message(exc)
+
+    users = await api_client.get_users()
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+    group_matrix = build_group_matrix(groups, servers, policies)
+
+    users_html = templates.env.get_template("_users_table.html").render(
+        {"request": request, "users": users, "groups": groups, "error": error, "success": success, "is_admin": True}
+    )
+    groups_html = templates.env.get_template("_groups_table.html").render(
+        {"request": request, "groups": group_matrix, "error": None, "success": None, "is_admin": True}
+    )
+    combined = users_html + f'<div id="groups-table-wrapper" hx-swap-oob="true">{groups_html}</div>'
+    return HTMLResponse(combined)
 
 @app.post("/groups/{group_id}/servers/{server_id}/policy", response_class=HTMLResponse)
 async def save_group_server_policy(
@@ -906,8 +928,23 @@ async def user_portal(request: Request):
     access_requests = []
 
     try:
-        servers = await api_client.get_servers()
         current_user_id = await _get_current_user_id(request)
+
+        all_servers = await api_client.get_servers()
+        groups = await api_client.get_groups()
+        policies = await api_client.list_group_server_policies()
+
+        # Tìm các group mà user hiện tại là thành viên
+        my_group_ids = [
+            g["id"] for g in groups
+            if current_user_id in [u["id"] for u in g.get("users", [])]
+        ]
+
+        # Chỉ giữ lại server mà 1 trong các group của user có Policy
+        allowed_server_ids = {
+            p["server_id"] for p in policies if p["group_id"] in my_group_ids
+        }
+        servers = [s for s in all_servers if s["id"] in allowed_server_ids]
 
         # Chỉ lấy grants của user đang đăng nhập
         grants_display = await _load_grants_display(current_user_id)
@@ -918,7 +955,7 @@ async def user_portal(request: Request):
             requests_raw = [
                 r for r in requests_raw if str(r.get("user_id")) == str(current_user_id)
             ]
-        access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+        access_requests = [attach_request_display(r, all_servers) for r in reversed(requests_raw)]
     except Exception as exc:
         load_error = _error_message(exc)
 
@@ -933,21 +970,7 @@ async def user_portal(request: Request):
         },
     )
 
-@app.post("/policy/create")
-async def create_policy_route(
-    request: Request,
-    group_id: str = Form(...),
-    server_id: str = Form(...),
-    policy: str = Form("allow"),
-    duration: int = Form(60),
-):
-    if not is_admin(request):
-        return {"error": "Chỉ Admin mới được tạo Policy."}
-    try:
-        result = await api_client.create_policy(group_id, server_id, policy, duration)
-        return {"success": True, "message": "Tạo Policy thành công!"}
-    except Exception as e:
-        return {"error": str(e)}
+
 
 @app.delete("/policy/{policy_id}")
 async def delete_policy_route(request: Request, policy_id: str):

@@ -83,9 +83,10 @@ async def update_server(
     server_id: str,
     name: str | None = None,
     ip: str | None = None,
+    protocol: str | None = None,
     tags: list[str] | None = None,
 ) -> dict:
-    """PUT {BASE_URL}/servers/{server_id}"""
+    """PATCH {BASE_URL}/servers/{server_id}"""
     if USE_MOCK:
         for s in _MOCK_SERVERS:
             if s["id"] == server_id:
@@ -93,20 +94,22 @@ async def update_server(
                     s["name"] = name
                 if ip is not None:
                     s["ip"] = ip
+                if protocol is not None:
+                    s["protocol"] = protocol
                 if tags is not None:
                     s["tags"] = tags
                 return s
         raise RuntimeError("Server not found")
-
     payload = {}
     if name is not None:
         payload["name"] = name
     if ip is not None:
         payload["ip"] = ip
+    if protocol is not None:
+        payload["protocol"] = protocol
     if tags is not None:
         payload["tags"] = tags
-
-    return await _request("PUT", f"/servers/{server_id}", json=payload)
+    return await _request("PATCH", f"/servers/{server_id}", json=payload)
 
 
 # ---------------------------------------------------------------------------
@@ -361,24 +364,6 @@ async def create_user_backend(
         payload["keycloak_sub"] = keycloak_sub
     return await _request("POST", "/auth/users/", json=payload)
 
-async def create_policy(group_id: str, server_id: str, policy: str = "allow", duration: int = 60) -> dict:
-    payload = {
-        "group_id": group_id,
-        "server_id": server_id,
-        "policy": policy,
-        "duration": duration
-    }
-    return await _request("POST", "/policy/group-server/", json=payload)
-
-async def delete_policy(policy_id: str) -> dict:
-    return await _request("DELETE", f"/policy/group-server/{policy_id}")
-
-async def delete_group_server_policy(policy_id: str) -> dict:
-    """DELETE {BASE_URL}/policy/group-server/{policy_id}"""
-    if USE_MOCK:
-        return {"message": "mock ok"}
-    return await _request("DELETE", f"/policy/group-server/{policy_id}")
-
 async def delete_group_backend(group_id: str) -> None:
     """DELETE {BASE_URL}/auth/groups/{group_id}"""
     if USE_MOCK:
@@ -396,3 +381,9 @@ async def get_audit_sessions() -> list[dict]:
     if USE_MOCK:
         return []
     return await _request("GET", "/audit/sessions/")
+
+async def assign_user_to_group(user_id: str, group_id: str) -> dict:
+    """POST {BASE_URL}/auth/users/{user_id}/groups/{group_id} — gán user vào group."""
+    if USE_MOCK:
+        return {"message": "mock ok"}
+    return await _request("POST", f"/auth/users/{user_id}/groups/{group_id}")

@@ -38,21 +38,21 @@ app.include_router(audit.router)
 # Serve static assets (CSS, JS)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
-# Admin Control Plane — http://HOST:8000/ui
-@app.get("/ui", include_in_schema=False)
-def admin_dashboard():
-    return FileResponse(str(BASE_DIR / "templates" / "index.html"))
+# Admin Control Plane demo (Inh) — ĐÃ TẮT, tránh trùng với UI chính port 8001
+# khi demo. Bật lại bằng cách bỏ comment nếu cần dùng lại.
+# @app.get("/ui", include_in_schema=False)
+# def admin_dashboard():
+#     return FileResponse(str(BASE_DIR / "templates" / "index.html"))
 
-# User Self-Service Portal — http://HOST:8000/portal
-@app.get("/portal", include_in_schema=False)
-def user_portal():
-    return FileResponse(str(BASE_DIR / "templates" / "portal.html"))
+# User Self-Service Portal demo (Inh) — ĐÃ TẮT, cùng lý do như trên.
+# @app.get("/portal", include_in_schema=False)
+# def user_portal():
+#     return FileResponse(str(BASE_DIR / "templates" / "portal.html"))
 
 @app.get("/")
 def read_root():
     return {
-        "status": "PAM Gateway v2.0 is running",
-        "admin_ui": "/ui",
-        "user_portal": "/portal",
+        "status": "PAM Gateway v2.0 is running (Control Plane API only)",
+        "note": "Admin UI và User Portal đã chuyển sang phục vụ ở PAM Gateway chính (port 8001).",
         "api_docs": "/docs"
     }

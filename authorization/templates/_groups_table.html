@@ -85,6 +85,12 @@
                         {% if not is_admin %}disabled{% endif %}
                     />
                 </td>
+                <td class="permissions-cell">
+                    <label><input type="checkbox" checked disabled /> Connect</label>
+                    <label><input type="checkbox" disabled /> View Only</label>
+                    <label><input type="checkbox" disabled /> Manage Policy</label>
+                    <label><input type="checkbox" disabled /> Audit</label>
+                </td>
                 <td>
                     {% if is_admin %}
                         <button

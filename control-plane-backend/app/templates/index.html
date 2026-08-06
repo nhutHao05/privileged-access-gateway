@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="PAM Gateway — Admin Dashboard for Privileged Access Management">
-    <title>PAM Gateway — Admin Dashboard</title>
+    <meta name="description" content="PAM Gateway — Admin Control Plane for Privileged Access Management">
+    <title>PAM Gateway — Admin Control Plane</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
@@ -17,7 +17,7 @@
                 <span class="logo-icon">🛡️</span>
                 <div class="logo-text">
                     <h1>PAM Gateway</h1>
-                    <span>Control Plane</span>
+                    <span>Admin Control Plane</span>
                 </div>
             </div>
         </div>
@@ -29,15 +29,16 @@
             <li><a href="#servers" class="nav-link" data-page="servers"><span class="nav-icon">🖥️</span> Máy chủ</a></li>
             <li><a href="#policies" class="nav-link" data-page="policies"><span class="nav-icon">🔐</span> Chính sách</a></li>
             <li class="nav-section">Quản lý truy cập</li>
-            <li><a href="#approvals" class="nav-link" data-page="approvals"><span class="nav-icon">✅</span> Phê duyệt Yêu cầu</a></li>
-            <li><a href="#grants" class="nav-link" data-page="grants"><span class="nav-icon">⚡</span> Quyền đang hoạt động</a></li>
-
-
+            <li><a href="#approvals" class="nav-link" data-page="approvals"><span class="nav-icon">✅</span> Phê duyệt <span class="pending-badge" id="pendingBadge" style="display:none"></span></a></li>
+            <li><a href="#grants" class="nav-link" data-page="grants"><span class="nav-icon">⚡</span> Quyền hoạt động</a></li>
             <li class="nav-section">Kiểm toán</li>
-            <li><a href="#audit" class="nav-link" data-page="audit"><span class="nav-icon">📊</span> Audit Trail</a></li>
+            <li><a href="#audit" class="nav-link" data-page="audit"><span class="nav-icon">📋</span> Audit Trail</a></li>
         </ul>
         <div class="sidebar-footer">
-            <div class="version-info">v1.0 — RBAC Engine</div>
+            <a href="/portal" target="_blank" class="portal-link">
+                <span>👤</span> Mở User Portal
+            </a>
+            <div class="version-info">v2.0 — PAM Production Ready</div>
         </div>
     </nav>
 
@@ -48,6 +49,7 @@
             <h2 class="page-title" id="pageTitle">Dashboard</h2>
             <div class="top-bar-actions">
                 <span class="status-badge online">● Hệ thống hoạt động</span>
+                <span class="admin-label">🔴 ADMIN</span>
             </div>
         </header>
         <div class="content-area" id="contentArea">

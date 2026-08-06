@@ -73,7 +73,7 @@
                 {% endfor %}
             </td>
             <td>
-                {% if can_manage %}
+                {% if is_admin %}
                 <button
                     class="btn-small btn-edit"
                     hx-get="/servers/{{ s.id }}/edit-row"

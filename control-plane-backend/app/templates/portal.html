@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PAM Gateway — User Self-Service Portal for Privileged Access Management">
+    <title>PAM Gateway — User Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/portal.css">
+</head>
+<body>
+
+    <!-- ── TOPBAR ── -->
+    <header class="portal-topbar">
+        <a href="/portal" class="portal-logo">
+            <div class="logo-icon">🛡️</div>
+            <div class="logo-text">
+                <span class="logo-name">PAM Gateway</span>
+                <span class="logo-sub">User Portal</span>
+            </div>
+        </a>
+
+        <nav class="topbar-nav">
+            <button class="topbar-btn active" data-page="home">
+                🏠 Trang chủ
+            </button>
+            <button class="topbar-btn" data-page="servers">
+                🖥️ Máy chủ
+            </button>
+            <button class="topbar-btn" data-page="requests">
+                📋 Yêu cầu của tôi
+            </button>
+        </nav>
+
+        <div class="topbar-right">
+            <!-- Demo: chọn user để simulate login -->
+            <div class="user-selector">
+                <label>👤 Đăng nhập:</label>
+                <select id="userSelector"></select>
+            </div>
+            <a href="/ui" target="_blank" class="admin-link">
+                🔴 Admin Panel
+            </a>
+        </div>
+    </header>
+
+    <!-- ── MAIN CONTENT ── -->
+    <main class="portal-content" id="portalContent">
+        <div class="p-loading">
+            <div class="p-spinner"></div>
+            Đang tải dữ liệu...
+        </div>
+    </main>
+
+    <!-- ── REQUEST MODAL ── -->
+    <div class="p-modal-overlay" id="pModalOverlay">
+        <div class="p-modal">
+            <div class="p-modal-header">
+                <h2 id="pModalTitle">Xin quyền truy cập</h2>
+                <p id="pModalSubtitle" style="color:var(--p-blue-light);font-weight:600;margin-top:4px"></p>
+            </div>
+            <div class="p-modal-body" id="pModalBody"></div>
+            <div class="p-modal-footer" id="pModalFooter"></div>
+        </div>
+    </div>
+
+    <!-- ── TOAST ── -->
+    <div class="p-toast-container" id="pToastContainer"></div>
+
+    <script src="/static/js/portal.js"></script>
+</body>
+</html>

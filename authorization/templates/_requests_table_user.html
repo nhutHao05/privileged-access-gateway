@@ -1,0 +1,41 @@
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+{% if not access_requests %}
+<p class="empty">Chưa có yêu cầu nào.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Server</th>
+            <th>Lý do</th>
+            <th>Thời lượng</th>
+            <th>Trạng thái</th>
+            <th>Thời gian gửi</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in access_requests %}
+        <tr>
+            <td>{{ r.server.name if r.server else "?" }}</td>
+            <td>{{ r.reason }}</td>
+            <td>{{ r.requested_minutes }} phút</td>
+            <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+            <td>{{ r.requested_at.strftime("%H:%M %d/%m") if r.requested_at else "—" }}</td>
+            <td>
+                {% if r.status == "approved" and r.guac_url %}
+                <a href="{{ r.guac_url }}" target="_blank" class="btn-small btn-approve" style="text-decoration:none; display:inline-block;">
+                    🔗 Kết nối
+                </a>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}

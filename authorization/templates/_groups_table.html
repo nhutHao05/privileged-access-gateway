@@ -17,7 +17,7 @@
                 <th>Được phép</th>
                 <th>Thời lượng tối đa (phút)</th>
                 <th>Cần duyệt</th>
-                <th></th>
+                <th>Thao tác</th>
             </tr>
         </thead>
         <tbody>
@@ -25,7 +25,7 @@
             <tr>
                 <td>{{ sp.server_name }}</td>
                 <td class="checkbox-cell">
-                    <input type="checkbox" name="enabled" {% if sp.enabled %}checked{% endif %} {% if not can_manage %}disabled{% endif %} />
+                    <input type="checkbox" name="enabled" {% if sp.enabled %}checked{% endif %} {% if not is_admin %}disabled{% endif %} />
                 </td>
                 <td>
                     <input
@@ -34,7 +34,7 @@
                         min="5"
                         max="480"
                         value="{{ sp.max_duration_minutes }}"
-                        {% if not can_manage %}disabled{% endif %}
+                        {% if not is_admin %}disabled{% endif %}
                     />
                 </td>
                 <td class="checkbox-cell">
@@ -42,20 +42,31 @@
                         type="checkbox"
                         name="requires_approval"
                         {% if sp.require_approval %}checked{% endif %}
-                        {% if not can_manage %}disabled{% endif %}
+                        {% if not is_admin %}disabled{% endif %}
                     />
                 </td>
                 <td>
-                    {% if can_manage %}
-                    <button
-                        class="btn-small btn-approve"
-                        hx-post="/groups/{{ g.id }}/servers/{{ sp.server_id }}/policy"
-                        hx-include="closest tr"
-                        hx-target="#groups-table-wrapper"
-                        hx-swap="innerHTML"
-                    >
-                        Lưu
-                    </button>
+                    {% if is_admin %}
+                        <button
+                            class="btn-small btn-approve"
+                            hx-post="/groups/{{ g.id }}/servers/{{ sp.server_id }}/policy"
+                            hx-include="closest tr"
+                            hx-target="#groups-table-wrapper"
+                            hx-swap="innerHTML"
+                        >
+                            Lưu
+                        </button>
+                        {% if sp.policy_id %}
+                        <button
+                            class="btn-small btn-danger"
+                            hx-delete="/policy/{{ sp.policy_id }}"
+                            hx-target="#groups-table-wrapper"
+                            hx-swap="innerHTML"
+                            hx-confirm="Bạn có chắc muốn xóa Policy này?"
+                        >
+                            Xóa
+                        </button>
+                        {% endif %}
                     {% endif %}
                 </td>
             </tr>

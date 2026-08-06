@@ -4,6 +4,7 @@ api_client.py — cầu nối tới API thật của Inh (Control Plane, FastAPI
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import httpx
 
@@ -117,6 +118,21 @@ async def get_groups() -> list[dict]:
     if USE_MOCK:
         return list(_MOCK_GROUPS)
     return await _request("GET", "/auth/groups/")  # <-- SỬA THÀNH THẾ NÀY
+
+async def create_group_backend(
+    name: str,
+    keycloak_group_id: str,
+    description: str | None = None,
+) -> dict:
+    """POST {BASE_URL}/auth/groups/ — tạo group bên Control Plane."""
+    if USE_MOCK:
+        new_group = {"id": f"g-{uuid.uuid4().hex[:6]}", "name": name}
+        _MOCK_GROUPS.append(new_group)
+        return new_group
+    payload = {"name": name, "keycloak_group_id": keycloak_group_id}
+    if description:
+        payload["description"] = description
+    return await _request("POST", "/auth/groups/", json=payload)   
 # ---------------------------------------------------------------------------
 # Policy management (Group-Server)
 # ---------------------------------------------------------------------------
@@ -195,7 +211,10 @@ async def list_access_requests() -> list[dict]:
 
 
 async def create_access_request(
-    group_id: str, server_id: str, reason: str, duration_minutes: int = 60
+    group_id: Optional[str] = None,   # <-- sửa thành Optional
+    server_id: str = None,
+    reason: str = None,
+    duration_minutes: int = 60
 ) -> dict:
     """
     POST {BASE_URL}/access/requests/
@@ -215,11 +234,13 @@ async def create_access_request(
         return new_req
 
     payload = {
-        "group_id": group_id,
         "server_id": server_id,
         "reason": reason,
         "duration_minutes": duration_minutes,
     }
+    if group_id:   # chỉ thêm group_id nếu có giá trị
+        payload["group_id"] = group_id
+
     return await _request("POST", "/access/requests/", json=payload)
 
 
@@ -239,6 +260,28 @@ async def review_access_request(request_id: str, status: str) -> dict:
         "POST", f"/access/requests/{request_id}/review", json={"status": status}
     )
 
+async def get_my_access_requests() -> list[dict]:
+    """Gọi API /access/requests/my của Control Plane, trả về request của chính user (theo token)."""
+    if USE_MOCK:
+        return list(_MOCK_REQUESTS)   # mock đơn giản
+    return await _request("GET", "/access/requests/my")
+
+async def get_my_user_id() -> str | None:
+    """Trả về ID của user hiện tại trong DB Control Plane (dùng token)."""
+    if USE_MOCK:
+        # Trong mock, không có user thật, trả về None
+        return None
+    try:
+        user = await _request("GET", "/auth/users/me")
+        return user.get("id")
+    except Exception:
+        return None
+    
+async def get_my_active_grants() -> list[dict]:
+    """Gọi API /access/grants/my để lấy quyền đang hoạt động của user hiện tại."""
+    if USE_MOCK:
+        return list(_MOCK_GRANTS)
+    return await _request("GET", "/access/grants/my")
 
 def _mock_create_grant(req: dict):
     s = next((srv for srv in _MOCK_SERVERS if srv["id"] == req["server_id"]), None)
@@ -293,3 +336,45 @@ async def _request(method: str, path: str, **kwargs) -> dict | list:
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
+
+async def get_users() -> list[dict]:
+    """Lấy danh sách tất cả users từ Control Plane."""
+    if USE_MOCK:
+        return []
+    return await _request("GET", "/auth/users/")        
+
+async def create_user_backend(
+    username: str,
+    email: str | None = None,
+    full_name: str | None = None,
+    keycloak_sub: str | None = None,   # THÊM DÒNG NÀY
+) -> dict:
+    """POST {BASE_URL}/auth/users/ — tạo user bên Control Plane."""
+    if USE_MOCK:
+        return {"id": f"u-{uuid.uuid4().hex[:6]}", "username": username}
+    payload = {"username": username}
+    if email:
+        payload["email"] = email
+    if full_name:
+        payload["full_name"] = full_name
+    if keycloak_sub:                     # THÊM KHỐI NÀY
+        payload["keycloak_sub"] = keycloak_sub
+    return await _request("POST", "/auth/users/", json=payload)
+
+async def create_policy(group_id: str, server_id: str, policy: str = "allow", duration: int = 60) -> dict:
+    payload = {
+        "group_id": group_id,
+        "server_id": server_id,
+        "policy": policy,
+        "duration": duration
+    }
+    return await _request("POST", "/policy/group-server/", json=payload)
+
+async def delete_policy(policy_id: str) -> dict:
+    return await _request("DELETE", f"/policy/group-server/{policy_id}")
+
+async def delete_group_server_policy(policy_id: str) -> dict:
+    """DELETE {BASE_URL}/policy/group-server/{policy_id}"""
+    if USE_MOCK:
+        return {"message": "mock ok"}
+    return await _request("DELETE", f"/policy/group-server/{policy_id}")

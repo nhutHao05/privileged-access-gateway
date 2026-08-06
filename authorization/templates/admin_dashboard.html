@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>PAM Gateway — Admin Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PAM Gateway — Quản trị</h1>
+            <nav class="nav">
+                <a href="/" class="active">Yêu cầu chờ duyệt</a>
+                <a href="/servers">Quản lý server</a>
+                <a href="/groups">Nhóm & phân quyền</a>
+                <a href="/active-grants">Quyền đang active</a>
+            </nav>
+        </header>
+
+        <section class="card">
+            <h2>Danh sách yêu cầu xin quyền</h2>
+            {% if load_error %}
+            <div class="alert alert-error">{{ load_error }}</div>
+            {% endif %}
+
+            <div id="requests-table-wrapper">
+                {% include "_requests_table.html" %}
+            </div>
+        </section>
+    </div>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>PAM Gateway - Xin quyền truy cập</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Xin quyền truy cập server</h1>
+
+        {% if load_error %}
+        <div class="alert alert-error">{{ load_error }}</div>
+        {% endif %}
+
+        <!-- Form xin quyền (giữ nguyên) -->
+        <form hx-post="/access-requests" hx-target="#my-requests" hx-swap="innerHTML">
+            <div class="form-row">
+                <label>Server</label>
+                <select name="server_id" required>
+                    {% for s in servers %}
+                    <option value="{{ s.id }}">{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-row">
+                <label>Lý do</label>
+                <input type="text" name="reason" required>
+            </div>
+            <div class="form-row">
+                <label>Thời lượng (phút)</label>
+                <input type="number" name="requested_minutes" value="60" min="5" max="480" required>
+            </div>
+            <button type="submit">Gửi yêu cầu</button>
+        </form>
+
+        <!-- Hiển thị các quyền đang hoạt động + nút kết nối -->
+        <h2>Quyền đang hoạt động</h2>
+        <div id="active-grants">
+            {% if my_grants %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Server</th>
+                        <th>Hết hạn</th>
+                        <th>Kết nối</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for g in my_grants %}
+                    <tr>
+                        <td>{{ g.server.name if g.server else "?" }}</td>
+                        <td>{{ g.remaining_text }}</td>
+                        <td>
+                            {% if g.grant_status == "active" and g.guac_url %}
+                            <a href="{{ g.guac_url }}" target="_blank" class="btn-small btn-approve" style="text-decoration:none; display:inline-block;">
+                                🔗 Kết nối
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="empty">Chưa có quyền nào đang active.</p>
+            {% endif %}
+        </div>
+
+        <!-- Danh sách yêu cầu của tôi (giữ lại để xem lịch sử) -->
+        <h2>Yêu cầu của tôi</h2>
+        <div id="my-requests">
+            {% include "_requests_table_user.html" %}
+        </div>
+    </div>
+</body>
+</html>

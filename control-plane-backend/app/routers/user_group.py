@@ -66,3 +66,18 @@ def assign_user_to_group(user_id: UUID, group_id: UUID, db: Session = Depends(ge
         db.commit()
     
     return {"message": f"Đã gán User '{user.username}' vào Nhóm '{group.name}' thành công."}
+
+# 6. API Xóa Group
+@router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_group(group_id: UUID, db: Session = Depends(get_db)):
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Không tìm thấy Group.")
+    if group.users:
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể xóa group còn thành viên. Gỡ hết user khỏi group trước."
+        )
+    db.delete(group)
+    db.commit()
+    return None

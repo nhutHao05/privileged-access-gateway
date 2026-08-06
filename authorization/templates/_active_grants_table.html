@@ -36,7 +36,7 @@
                 {% endif %}
             </td>
             <td>
-                {% if g.grant_status == "active" and can_manage %}
+                {% if g.grant_status == "active" and is_admin %}
                 <button
                     class="btn-small btn-reject"
                     hx-post="/active-grants/{{ g.id }}/revoke"

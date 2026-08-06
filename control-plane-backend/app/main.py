@@ -11,19 +11,16 @@ BASE_DIR = Path(__file__).resolve().parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: khởi động scheduler
     scheduler.start()
     print("⏰ [SCHEDULER] APScheduler đã khởi động.")
     yield
-    # Shutdown: tắt scheduler sạch sẽ
     scheduler.shutdown()
     print("⏰ [SCHEDULER] APScheduler đã tắt.")
 
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="PAM Gateway - RBAC Engine", version="0.1", lifespan=lifespan)
+app = FastAPI(title="PAM Gateway - RBAC Engine", version="2.0", lifespan=lifespan)
 
-# Cấu hình CORS để Frontend UI của Nghĩa gọi API không bị trình duyệt chặn
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,11 +38,21 @@ app.include_router(audit.router)
 # Serve static assets (CSS, JS)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
-# Admin Dashboard UI — Truy cập tại http://HOST:8000/ui
+# Admin Control Plane — http://HOST:8000/ui
 @app.get("/ui", include_in_schema=False)
 def admin_dashboard():
     return FileResponse(str(BASE_DIR / "templates" / "index.html"))
 
+# User Self-Service Portal — http://HOST:8000/portal
+@app.get("/portal", include_in_schema=False)
+def user_portal():
+    return FileResponse(str(BASE_DIR / "templates" / "portal.html"))
+
 @app.get("/")
 def read_root():
-    return {"status": "PAM Gateway Backend is running", "format": "snake_case_active"}
+    return {
+        "status": "PAM Gateway v2.0 is running",
+        "admin_ui": "/ui",
+        "user_portal": "/portal",
+        "api_docs": "/docs"
+    }

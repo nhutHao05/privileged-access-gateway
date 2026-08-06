@@ -7,6 +7,8 @@ Bản chuẩn giữ nguyên biến `ip` khớp với Control Plane Backend của
 from datetime import datetime, timezone
 
 import httpx
+import api_client
+import keycloak_admin
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
@@ -19,7 +21,7 @@ from authlib.integrations.starlette_client import OAuth
 import api_client
 
 app = FastAPI(title="PAM Gateway - Authorization & UI")
-
+GUACAMOLE_BASE_URL = "https://52.55.177.7"
 
 # ---------------------------------------------------------------------------
 # Bước B: đọc nhóm thật từ role Keycloak (realm_access.roles trong JWT)
@@ -57,18 +59,12 @@ def resolve_groups_for_roles(groups: list[dict], roles: list[str]) -> list[dict]
 # khoản chưa có role PAM-* nào chỉ được xem (read-only) ở các tab đó.
 # ---------------------------------------------------------------------------
 
-MANAGE_ROLES = {"PAM-Admins", "PAM-Support"}
+ADMIN_ROLES = {"PAM-Admins"}
 
-PERMISSION_DENIED_MSG = (
-    "Bạn không có quyền thao tác này (chỉ PAM-Admins / PAM-Support). "
-    "Tài khoản của bạn hiện chỉ có quyền xem."
-)
-
-
-def _can_manage(request: Request) -> bool:
-    """True nếu user có role PAM-Admins hoặc PAM-Support."""
+def is_admin(request: Request) -> bool:
+    """True nếu user có role PAM-Admins."""
     roles = request.session.get("roles", [])
-    return any(r in MANAGE_ROLES for r in roles)    
+    return any(r in ADMIN_ROLES for r in roles)
 
 # ---------------------------------------------------------------------------
 # Đăng nhập qua Keycloak (OIDC)
@@ -113,9 +109,11 @@ app.add_middleware(SessionMiddleware, secret_key="doi-chuoi-nay-thanh-ngau-nhien
 
 
 def _redirect_uri(request: Request) -> str:
-    """Tự lấy đúng host đang truy cập (localhost/LAN/Tailscale), không hardcode."""
-    return f"{request.base_url}auth/callback"
-
+    """Tự lấy host đang truy cập, nhưng đảm bảo dùng localhost cho Keycloak."""
+    base = str(request.base_url)
+    # Thay thế 127.0.0.1 thành localhost để khớp với cấu hình Keycloak
+    base = base.replace("127.0.0.1", "localhost")
+    return f"{base}auth/callback"
 
 @app.get("/login")
 async def login(request: Request):
@@ -131,6 +129,7 @@ async def login(request: Request):
         "redirect_uri": _redirect_uri(request),
         "scope": "openid profile email",
         "state": state,
+        "prompt": "login",          # 👈 Thêm dòng này
     }
     return RedirectResponse(url=f"{auth_endpoint}?{urlencode(params)}")
 
@@ -176,12 +175,6 @@ async def auth_callback(request: Request):
     except Exception:
         userinfo = {}
 
-    # CHỈ lưu vài field nhỏ cần thiết, KHÔNG lưu nguyên payload JWT đầy đủ.
-    # Lý do: session của app này lưu toàn bộ trong 1 cookie (không phải
-    # server-side session), cookie trình duyệt giới hạn ~4KB. Payload JWT
-    # gốc của Keycloak (đặc biệt realm_access/resource_access) có thể khá
-    # nặng; cộng thêm access_token + id_token dễ vượt giới hạn, khiến
-    # trình duyệt âm thầm không lưu cookie -> lặp vô hạn login.
     request.session["user"] = {
         "sub": userinfo.get("sub"),
         "preferred_username": userinfo.get("preferred_username"),
@@ -189,7 +182,12 @@ async def auth_callback(request: Request):
     request.session["access_token"] = access_token
     request.session["id_token"] = id_token
     request.session["roles"] = _extract_pam_roles(userinfo)
-    return RedirectResponse(url="/")
+
+    # Điều hướng đúng role
+    if is_admin(request):
+        return RedirectResponse(url="/")
+    else:
+        return RedirectResponse(url="/portal")
 
 
 @app.get("/logout")
@@ -251,34 +249,52 @@ def _error_message(exc: Exception) -> str:
     return str(exc)
 
 
-def build_group_matrix(groups: list[dict], servers: list[dict], policies: list[dict]) -> list[dict]:
-    policy_map = {(p["group_id"], p["server_id"]): p for p in policies}
+def build_group_matrix(groups, servers, policies):
+    """
+    groups: list of group dicts từ API /auth/groups/
+    servers: list of server dicts từ API /servers/
+    policies: list of policy dicts từ API /policy/group-server/
+    Trả về list groups với mỗi group có key 'server_policies' chứa tất cả servers.
+    """
+    # Tạo map server_id -> server_name
+    server_map = {s["id"]: s["name"] for s in servers}
+
+    # Tạo map policy: key = (group_id, server_id) -> policy dict
+    policy_map = {}
+    for p in policies:
+        key = (p["group_id"], p["server_id"])
+        policy_map[key] = p
+
     result = []
     for g in groups:
         server_policies = []
         for s in servers:
-            pol = policy_map.get((g["id"], s["id"]))
-            if pol is not None:
+            key = (g["id"], s["id"])
+            if key in policy_map:
+                p = policy_map[key]
+                # Đã có policy -> lấy thông tin thực tế
                 server_policies.append({
                     "server_id": s["id"],
                     "server_name": s["name"],
-                    "enabled": True,
-                    "max_duration_minutes": pol.get("max_duration_minutes", 60),
-                    "require_approval": pol.get("require_approval", True),
+                    "enabled": p.get("enabled", False),
+                    "max_duration_minutes": p.get("max_duration_minutes", 60),
+                    "require_approval": p.get("require_approval", True),
+                    "policy_id": p["id"],  # để xóa nếu cần
                 })
             else:
+                # Chưa có policy -> tạo policy mặc định (chưa enabled)
                 server_policies.append({
                     "server_id": s["id"],
                     "server_name": s["name"],
                     "enabled": False,
                     "max_duration_minutes": 60,
                     "require_approval": True,
+                    "policy_id": None,  # chưa có
                 })
-        result.append({
-            "id": g["id"],
-            "name": g["name"],
-            "server_policies": server_policies,
-        })
+        # Sắp xếp theo tên server cho dễ nhìn
+        server_policies.sort(key=lambda x: x["server_name"])
+        g["server_policies"] = server_policies
+        result.append(g)
     return result
 
 
@@ -322,75 +338,45 @@ def _parse_dt(value):
 
 def attach_request_display(r: dict, servers: list[dict]) -> dict:
     server = next((s for s in servers if s["id"] == r.get("server_id")), None)
+    guac_url = ""
+    if server and server.get("guacamole_connection_id"):
+        import base64
+        token = f"{server['guacamole_connection_id']}\0c\0postgresql"
+        encoded = base64.b64encode(token.encode()).decode()
+        guac_url = f"{GUACAMOLE_BASE_URL}/#/client/{encoded}"
     return {
         **r,
         "server": server,
         "requested_minutes": r.get("requested_minutes") or r.get("duration_minutes") or 0,
         "requested_at": _parse_dt(r.get("created_at") or r.get("requested_at")),
+        "guac_url": guac_url,
     }
 
 
 @app.get("/", response_class=HTMLResponse)
-async def request_access_page(request: Request, group_id: str | None = None):
+async def admin_dashboard(request: Request):
+    # Chỉ admin mới vào được
+    if not is_admin(request):
+        return RedirectResponse(url="/portal")
+
     load_error = None
-    role_warning = None
-    groups, servers, policies, requests_raw = [], [], [], []
+    requests_raw = []
+    servers = []
     try:
-        groups = await api_client.get_groups()
         servers = await api_client.get_servers()
-        policies = await api_client.list_group_server_policies()
         requests_raw = await api_client.list_access_requests()
     except Exception as exc:
         load_error = _error_message(exc)
 
-    user_roles = request.session.get("roles", [])
-    my_groups = []
-
-    if not load_error:
-        # Chỉ tính role_warning khi Control Plane trả về dữ liệu bình thường —
-        # nếu load_error đã xảy ra thì không có "groups" thật để mà so khớp,
-        # nói "không khớp role" lúc đó sẽ gây hiểu lầm (như vụ /auth/groups/ 500).
-        my_groups = resolve_groups_for_roles(groups, user_roles)
-
-        if not user_roles:
-            # Trường hợp B: tài khoản chưa được gán role PAM-* nào cả.
-            role_warning = (
-                "Tài khoản của bạn chưa được gán quyền (role) nào trong hệ thống. "
-                "Liên hệ quản trị viên để được cấp role phù hợp "
-                "(PAM-Admins / PAM-Support / PAM-Auditors)."
-            )
-        elif not my_groups:
-            # Trường hợp C: có role nhưng tên không khớp nhóm nào bên Inh.
-            role_display = ", ".join(user_roles)
-            role_warning = (
-                f"Không khớp được role Keycloak ({role_display}) với nhóm nào bên Control Plane. "
-                "Liên hệ quản trị viên để kiểm tra lại cấu hình nhóm/role."
-            )
-            # Không còn fallback cho chọn nhóm thủ công (đã gỡ demo dropdown) —
-            # nếu role không khớp thì chặn hẳn, không cho request tới khi nào
-            # mapping được sửa đúng.
-
-    selected_group = find_group(my_groups, group_id) if group_id else None
-    if selected_group is None and my_groups:
-        selected_group = my_groups[0]
-
-    allowed_servers = (
-        allowed_servers_for_group(servers, policies, selected_group["id"])
-        if selected_group else []
-    )
     access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
 
     return templates.TemplateResponse(
         request,
-        "index.html",
+        "admin_dashboard.html",   # Template mới cho Admin
         {
-            "groups": my_groups,
-            "selected_group_id": selected_group["id"] if selected_group else None,
-            "allowed_servers": allowed_servers,
             "access_requests": access_requests,
             "load_error": load_error,
-            "role_warning": role_warning,
-            "can_manage": _can_manage(request),
+            "is_admin": True,
         },
     )
 
@@ -398,10 +384,10 @@ async def request_access_page(request: Request, group_id: str | None = None):
 @app.post("/access-requests", response_class=HTMLResponse)
 async def submit_access_request(
     request: Request,
-    group_id: str = Form(...),
     server_id: str = Form(...),
     reason: str = Form(...),
     requested_minutes: int = Form(60),
+    group_id: str = Form(None),   # optional
 ):
     error = None
     success = None
@@ -416,18 +402,21 @@ async def submit_access_request(
     except Exception as exc:
         error = _error_message(exc)
 
+    # Lấy danh sách request của user hiện tại
+    user = request.session.get("user")
     servers = await api_client.get_servers()
     requests_raw = await api_client.list_access_requests()
-    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+    my_requests = [r for r in requests_raw if r.get("user_id") == user.get("sub")] if user else []
+    access_requests = [attach_request_display(r, servers) for r in reversed(my_requests)]
 
+    # Trả về bảng dành cho user (có nút Kết nối khi approved)
     return templates.TemplateResponse(
         request,
-        "_request_response.html",
+        "_requests_table_user.html",
         {
             "error": error,
             "success": success,
             "access_requests": access_requests,
-            "can_manage": _can_manage(request),
         },
     )
 
@@ -435,11 +424,11 @@ async def submit_access_request(
 
 @app.post("/access-requests/{request_id}/approve", response_class=HTMLResponse)
 async def approve_request_from_index(request: Request, request_id: str):
-    can_manage = _can_manage(request)
+    can_manage = is_admin(request)
     error = None
 
     if not can_manage:
-        error = PERMISSION_DENIED_MSG
+        error = "Bạn không có quyền (chỉ Admin)."
     else:
         try:
             await api_client.review_access_request(request_id, status="approved")
@@ -457,7 +446,7 @@ async def approve_request_from_index(request: Request, request_id: str):
             "error": error,
             "success": None if error else "Đã duyệt yêu cầu.",
             "access_requests": access_requests,
-            "can_manage": can_manage,
+            "is_admin": can_manage,
         },
         status_code=403 if not can_manage else 200,
     )
@@ -465,11 +454,11 @@ async def approve_request_from_index(request: Request, request_id: str):
 
 @app.post("/access-requests/{request_id}/reject", response_class=HTMLResponse)
 async def reject_request_from_index(request: Request, request_id: str):
-    can_manage = _can_manage(request)
+    can_manage = is_admin(request)
     error = None
 
     if not can_manage:
-        error = PERMISSION_DENIED_MSG
+        error = "Bạn không có quyền (chỉ Admin)."
     else:
         try:
             await api_client.review_access_request(request_id, status="rejected")
@@ -487,7 +476,7 @@ async def reject_request_from_index(request: Request, request_id: str):
             "error": error,
             "success": None if error else "Đã từ chối yêu cầu.",
             "access_requests": access_requests,
-            "can_manage": can_manage,
+            "is_admin": can_manage,
         },
         status_code=403 if not can_manage else 200,
     )
@@ -507,7 +496,7 @@ async def servers_page(request: Request):
     return templates.TemplateResponse(
         request,
         "servers.html",
-        {"servers": servers, "editing_id": None, "error": error, "can_manage": _can_manage(request)},
+        {"servers": servers, "editing_id": None, "error": error, "is_admin": is_admin(request)},
     )
 
 
@@ -523,13 +512,13 @@ async def servers_table_partial(request: Request):
     return templates.TemplateResponse(
         request,
         "_servers_table.html",
-        {"servers": servers, "editing_id": None, "error": error, "can_manage": _can_manage(request)},
+        {"servers": servers, "editing_id": None, "error": error, "is_admin": is_admin(request)},
     )
 
 
 @app.get("/servers/{server_id}/edit-row", response_class=HTMLResponse)
 async def edit_server_row(request: Request, server_id: str):
-    can_manage = _can_manage(request)
+    can_manage = is_admin(request)
     error = None
     servers = []
     try:
@@ -538,7 +527,7 @@ async def edit_server_row(request: Request, server_id: str):
         error = _error_message(exc)
 
     if not can_manage:
-        error = error or PERMISSION_DENIED_MSG
+        error = error or "Bạn không có quyền (chỉ Admin)."
 
     return templates.TemplateResponse(
         request,
@@ -549,7 +538,7 @@ async def edit_server_row(request: Request, server_id: str):
             # (nút vốn đã ẩn ở UI) cũng chỉ nhận lại bảng chỉ-xem + báo lỗi.
             "editing_id": server_id if can_manage else None,
             "error": error,
-            "can_manage": can_manage,
+            "is_admin": can_manage,
         },
         status_code=403 if not can_manage else 200,
     )
@@ -563,13 +552,13 @@ async def edit_server(
     ip: str = Form(None),
     tags: str = Form(None),
 ):
-    can_manage = _can_manage(request)
+    can_manage = is_admin(request)
     error = None
     success = None
     tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
     if not can_manage:
-        error = PERMISSION_DENIED_MSG
+        error = "Bạn không có quyền (chỉ Admin)."
     else:
         try:
             await api_client.update_server(server_id, name=name, ip=ip, tags=tags_list)
@@ -587,7 +576,7 @@ async def edit_server(
             "editing_id": None,
             "error": error,
             "success": success,
-            "can_manage": can_manage,
+            "is_admin": can_manage,
         },
         status_code=403 if not can_manage else 200,
     )
@@ -615,24 +604,56 @@ def attach_grant_display(g: dict, servers: list[dict], requests_raw: list[dict])
     status = "active" if (expires_at is None or expires_at > datetime.now(timezone.utc)) else "expired"
     req = next((r for r in requests_raw if r.get("id") == g.get("request_id")), None)
     reason = (req or {}).get("reason") or g.get("reason") or "—"
+    guac_url = ""
+    if server and server.get("guacamole_connection_id"):
+        import base64
+        token = f"{server['guacamole_connection_id']}\0c\0postgresql"
+        encoded = base64.b64encode(token.encode()).decode()
+        guac_url = f"{GUACAMOLE_BASE_URL}/#/client/{encoded}"
     return {
         **g,
         "server": server,
         "reason": reason,
         "grant_status": status,
         "remaining_text": _remaining_text(expires_at) if status == "active" else "",
+        "guac_url": guac_url,
     }
 
 
-async def _load_grants_display() -> list[dict]:
+async def _get_current_user_id(request: Request) -> str | None:
+    """Tra user_id (Control Plane) từ preferred_username lưu trong session.
+    (Không dùng keycloak_sub vì GET /auth/users/ hiện chưa trả về field này.)
+    """
+    user_info = request.session.get("user") or {}
+    username = user_info.get("preferred_username")
+    if not username:
+        return None
+    try:
+        users = await api_client.get_users()
+    except Exception:
+        return None
+    for u in users:
+        if str(u.get("username")) == str(username):
+            return u.get("id")
+    return None
+
+
+async def _load_grants_display(current_user_id: str | None = None) -> list[dict]:
     grants = await api_client.list_active_grants()
     servers = await api_client.get_servers()
     requests_raw = await api_client.list_access_requests()
+
+    if current_user_id:
+        grants = [g for g in grants if str(g.get("user_id")) == str(current_user_id)]
+
     return [attach_grant_display(g, servers, requests_raw) for g in grants]
 
 
 @app.get("/active-grants", response_class=HTMLResponse)
 async def active_grants_page(request: Request):
+    if not is_admin(request):
+        return RedirectResponse(url="/portal")
+
     error = None
     grants_display = []
     try:
@@ -644,7 +665,7 @@ async def active_grants_page(request: Request):
     return templates.TemplateResponse(
         request,
         "active_grants.html",
-        {"grants": grants_display, "error": error, "can_manage": _can_manage(request)},
+        {"grants": grants_display, "error": error, "is_admin": is_admin(request)},
     )
 
 
@@ -660,17 +681,17 @@ async def active_grants_table_partial(request: Request):
     return templates.TemplateResponse(
         request,
         "_active_grants_table.html",
-        {"grants": grants_display, "error": error, "can_manage": _can_manage(request)},
+        {"grants": grants_display, "error": error, "is_admin": is_admin(request)},
     )
 
 
 @app.post("/active-grants/{grant_id}/revoke", response_class=HTMLResponse)
 async def revoke_grant_route(request: Request, grant_id: str):
-    can_manage = _can_manage(request)
+    can_manage = is_admin(request)
     error = None
 
     if not can_manage:
-        error = PERMISSION_DENIED_MSG
+        error = "Bạn không có quyền (chỉ Admin)."
     else:
         try:
             await api_client.revoke_grant(grant_id)
@@ -686,7 +707,7 @@ async def revoke_grant_route(request: Request, grant_id: str):
     return templates.TemplateResponse(
         request,
         "_active_grants_table.html",
-        {"grants": grants_display, "error": error, "can_manage": can_manage},
+        {"grants": grants_display, "error": error, "is_admin": can_manage},
         status_code=403 if not can_manage else 200,
     )
 
@@ -696,6 +717,9 @@ async def revoke_grant_route(request: Request, grant_id: str):
 
 @app.get("/groups", response_class=HTMLResponse)
 async def groups_page(request: Request):
+    if not is_admin(request):
+        return RedirectResponse(url="/portal")
+
     error = None
     group_matrix = []
     try:
@@ -713,7 +737,91 @@ async def groups_page(request: Request):
             "groups": group_matrix,
             "error": error,
             "success": None,
-            "can_manage": _can_manage(request),
+            "is_admin": is_admin(request),
+        },
+    )
+
+@app.post("/groups/create", response_class=HTMLResponse)
+async def create_group_route(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(None),
+):
+    error = None
+    success = None
+
+    if not is_admin(request):
+        error = "Bạn không có quyền (chỉ Admin)."
+    else:
+        try:
+            # Tạo ở Keycloak trước, lấy UUID role vừa tạo để đồng bộ ID
+            # sang Control Plane (cột keycloak_group_id yêu cầu NOT NULL).
+            await keycloak_admin.create_realm_role(name, description or "")
+            kc_id = await keycloak_admin.get_role_id_by_name(name)
+            await api_client.create_group_backend(name, kc_id, description)
+            success = f"Đã tạo group '{name}' thành công (Keycloak + Control Plane)."
+        except Exception as exc:
+            error = _error_message(exc)
+
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+
+    return templates.TemplateResponse(
+        request,
+        "_groups_table.html",
+        {
+            "groups": build_group_matrix(groups, servers, policies),
+            "error": error,
+            "success": success,
+        },
+    )
+
+@app.post("/users/create", response_class=HTMLResponse)
+async def create_user_route(
+    request: Request,
+    username: str = Form(...),
+    email: str = Form(None),
+    full_name: str = Form(None),
+    temp_password: str = Form(...),
+    group_id: str = Form(None),
+):
+    error = None
+    success = None
+
+    if not is_admin(request):
+        error = "Bạn không có quyền (chỉ Admin)."
+    else:
+        try:
+            kc_user_id = await keycloak_admin.create_user(
+                username, email, full_name, temp_password
+            )
+            cp_user = await api_client.create_user_backend(
+    username, email, full_name, keycloak_sub=kc_user_id
+)
+
+            if group_id:
+                groups = await api_client.get_groups()
+                group = next((g for g in groups if g["id"] == group_id), None)
+                if group:
+                    await keycloak_admin.assign_realm_role_to_user(kc_user_id, group["name"])
+                    await api_client.assign_user_to_group(cp_user["id"], group_id)
+
+            success = f"Đã tạo user '{username}' thành công (password tạm, bắt buộc đổi khi đăng nhập lần đầu)."
+        except Exception as exc:
+            error = _error_message(exc)
+
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+
+    return templates.TemplateResponse(
+        request,
+        "_groups_table.html",
+        {
+            "groups": build_group_matrix(groups, servers, policies),
+            "error": error,
+            "success": success,
         },
     )
 
@@ -727,6 +835,22 @@ async def save_group_server_policy(
     max_duration_minutes: str = Form("60"),
     requires_approval: str = Form(None),
 ):
+    can_manage = is_admin(request)
+    if not can_manage:
+        groups = await api_client.get_groups()
+        servers = await api_client.get_servers()
+        policies = await api_client.list_group_server_policies()
+        return templates.TemplateResponse(
+            request,
+            "_groups_table.html",
+            {
+                "groups": build_group_matrix(groups, servers, policies),
+                "error": "Bạn không có quyền (chỉ Admin).",
+                "success": None,
+            },
+            status_code=403,
+        )
+
     error = None
     success = None
     
@@ -766,4 +890,80 @@ async def save_group_server_policy(
             "error": error,
             "success": success,
         },
+        
     )
+
+    # ... các route khác ở trên ...
+
+@app.get("/portal", response_class=HTMLResponse)
+async def user_portal(request: Request):
+    if is_admin(request):
+        return RedirectResponse(url="/")
+
+    load_error = None
+    servers = []
+    grants_display = []
+    access_requests = []
+
+    try:
+        servers = await api_client.get_servers()
+        current_user_id = await _get_current_user_id(request)
+
+        # Chỉ lấy grants của user đang đăng nhập
+        grants_display = await _load_grants_display(current_user_id)
+
+        # Chỉ lấy request của user đang đăng nhập
+        requests_raw = await api_client.list_access_requests()
+        if current_user_id:
+            requests_raw = [
+                r for r in requests_raw if str(r.get("user_id")) == str(current_user_id)
+            ]
+        access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+    except Exception as exc:
+        load_error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "portal.html",
+        {
+            "servers": servers,
+            "my_grants": grants_display,
+            "access_requests": access_requests,
+            "load_error": load_error,
+        },
+    )
+
+@app.post("/policy/create")
+async def create_policy_route(
+    request: Request,
+    group_id: str = Form(...),
+    server_id: str = Form(...),
+    policy: str = Form("allow"),
+    duration: int = Form(60),
+):
+    if not is_admin(request):
+        return {"error": "Chỉ Admin mới được tạo Policy."}
+    try:
+        result = await api_client.create_policy(group_id, server_id, policy, duration)
+        return {"success": True, "message": "Tạo Policy thành công!"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.delete("/policy/{policy_id}")
+async def delete_policy_route(request: Request, policy_id: str):
+    if not is_admin(request):
+        return JSONResponse(status_code=403, content={"error": "Chỉ Admin mới được xóa Policy."})
+    try:
+        await api_client.delete_group_server_policy(policy_id)
+        # Sau khi xóa, trả về bảng mới (partial) để cập nhật UI
+        groups = await api_client.get_groups()
+        servers = await api_client.get_servers()
+        policies = await api_client.list_group_server_policies()
+        matrix = build_group_matrix(groups, servers, policies)
+        return templates.TemplateResponse(
+            request,
+            "_groups_table.html",
+            {"groups": matrix, "is_admin": is_admin(request)}
+        )
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": _error_message(exc)})

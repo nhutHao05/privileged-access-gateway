@@ -8,6 +8,7 @@ class UserCreate(BaseModel):
     username: str
     email: Optional[str] = None
     full_name: Optional[str] = None
+    keycloak_sub: Optional[UUID] = None
 
 class UserResponse(UserCreate):
     id: UUID
@@ -36,4 +37,4 @@ class GroupResponse(GroupCreate):
     users: List[UserBrief] = []
 
     class Config:
-        from_attributes = True
+        from_attributes = True

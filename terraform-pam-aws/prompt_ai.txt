@@ -1,0 +1,491 @@
+=== FILE: main.tf === 
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+# ---------------------------------------------------------------------------
+# Dùng default VPC có sẵn của AWS — KHÔNG tạo VPC riêng, đúng scope nhỏ gọn.
+# ---------------------------------------------------------------------------
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+# Lấy AMI Ubuntu 22.04 mới nhất (chính chủ Canonical, không phải hàng lạ)
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Security Group — chỉ mở đúng port cần thiết
+# ---------------------------------------------------------------------------
+resource "aws_security_group" "pam_sg" {
+  name        = "${var.project_name}-sg"
+  description = "Security group for PAM Gateway (Guacamole + Control Plane) on AWS"
+  vpc_id      = data.aws_vpc.default.id
+
+  # SSH — CHỈ cho IP của ní, không mở public
+  ingress {
+    description = "SSH tu may cua Nghia"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr]
+  }
+
+ # Control Plane API (Inh) - port 8000, chi cho IP thanh vien nhom
+  ingress {
+    description = "Control Plane API - chi IP thanh vien nhom"
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    cidr_blocks = var.team_ips_cidr
+  }
+
+  # Guacamole web UI - port 8080 (nếu cần truy cập trực tiếp để debug)
+  # HTTP - port 80 (redirect sang HTTPS)
+  ingress {
+    description = "HTTP for nginx redirect"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # HTTPS - port 443 (cong chinh vao Guacamole qua nginx)
+  ingress {
+    description = "HTTPS via nginx"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Cho phep moi ket noi ra ngoai"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name    = "${var.project_name}-sg"
+    Project = "PAM Gateway"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# EC2 Instance
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Security Group rieng cho EC2 demo target (Guacamole ket noi vao de demo)
+# ---------------------------------------------------------------------------
+resource "aws_security_group" "demo_target_sg" {
+  name        = "${var.project_name}-demo-target-sg"
+  description = "SG cho EC2 demo target - chi cho SSH tu server chinh (Guacamole) va tu may Nghia"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description     = "SSH tu server chinh, Guacamole dung de ket noi demo"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.pam_sg.id]
+  }
+
+  ingress {
+    description = "SSH tu IP thanh vien nhom de setup/kiem tra"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.team_ips_cidr
+  }
+
+  egress {
+    description = "Cho phep moi ket noi ra ngoai"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name    = "${var.project_name}-demo-target-sg"
+    Project = "PAM Gateway"
+  }
+}
+
+resource "aws_instance" "pam_server" {
+  ami                    = "ami-0446f93cefa2981e5"  # ghim cung, khong auto-update nua
+  instance_type          = var.instance_type
+  key_name               = var.key_pair_name
+  subnet_id              = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.pam_sg.id]
+
+  root_block_device {
+    volume_size = var.root_volume_size_gb
+    volume_type = "gp3"
+  }
+
+  user_data = file("${path.module}/user_data.sh")
+
+  tags = {
+    Name    = "${var.project_name}-server"
+    Project = "PAM Gateway"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# EC2 demo target - server "that" de demo cho mentor (khac voi target_vnc/
+# target_linux_ssh la container gia lap trong docker-compose)
+# ---------------------------------------------------------------------------
+resource "random_password" "demo_target_password" {
+  length  = 16
+  special = false # bo ky tu dac biet cho de doc/nhap khi demo truc tiep
+}
+
+resource "aws_instance" "demo_target" {
+  ami                    = "ami-0446f93cefa2981e5" # ghim cung, tranh bi thay the khi AWS ra AMI moi
+  instance_type          = "t3.micro"
+  key_name               = var.key_pair_name
+  subnet_id               = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.demo_target_sg.id]
+
+  root_block_device {
+    volume_size = 8
+    volume_type = "gp3"
+  }
+
+  user_data = <<-EOF
+    #!/bin/bash
+    echo "ubuntu:${random_password.demo_target_password.result}" | chpasswd
+    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    if [ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]; then
+      sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+    fi
+    systemctl restart ssh
+  EOF
+
+  tags = {
+    Name    = "${var.project_name}-demo-target"
+    Project = "PAM Gateway"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Elastic IP — để IP không đổi mỗi lần restart instance
+# ---------------------------------------------------------------------------
+resource "aws_eip" "pam_eip" {
+  instance = aws_instance.pam_server.id
+  domain   = "vpc"
+
+  tags = {
+    Name = "${var.project_name}-eip"
+  }
+}
+
+=== FILE: outputs.tf === 
+output "public_ip" {
+  description = "IP tinh (Elastic IP) cua may chu tren AWS"
+  value       = aws_eip.pam_eip.public_ip
+}
+
+output "ssh_command" {
+  description = "Lenh SSH de vao may"
+  value       = "ssh -i <ten-file-key.pem> ubuntu@${aws_eip.pam_eip.public_ip}"
+}
+
+output "control_plane_url" {
+  description = "URL Control Plane API tu ben ngoai"
+  value       = "http://${aws_eip.pam_eip.public_ip}:8000"
+}
+
+output "guacamole_url" {
+  description = "URL Guacamole web UI tu ben ngoai (qua nginx reverse proxy, cert tu ky)"
+  value       = "https://${aws_eip.pam_eip.public_ip}"
+}
+
+output "demo_target_ip" {
+  description = "Public IP cua EC2 demo target (khong dung Elastic IP, co the doi neu stop/start)"
+  value       = aws_instance.demo_target.public_ip
+}
+
+output "demo_target_username" {
+  description = "Username SSH cua EC2 demo target"
+  value       = "ubuntu"
+}
+
+output "demo_target_password" {
+  description = "Password SSH cua EC2 demo target"
+  value       = random_password.demo_target_password.result
+  sensitive   = true
+}
+
+=== FILE: variables.tf === 
+variable "aws_region" {
+  description = "AWS region để deploy"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "instance_type" {
+  description = "Loại EC2 instance. Guacamole khá ăn RAM nên đừng chọn t3.micro (dễ bị OOM)."
+  type        = string
+  default     = "t3.small"
+}
+
+variable "key_pair_name" {
+  description = "Tên Key Pair EC2 dùng để SSH vào máy (tạo sẵn trên AWS Console trước, xem README bước 1)"
+  type        = string
+}
+
+variable "my_ip_cidr" {
+  description = "IP của ní (dạng x.x.x.x/32) để giới hạn ai được SSH vào máy — TUYỆT ĐỐI không để 0.0.0.0/0 cho port 22"
+  type        = string
+}
+
+variable "root_volume_size_gb" {
+  description = "Dung lượng ổ đĩa gốc (GB). Guacamole + Postgres + Control Plane cần kha khá chỗ."
+  type        = number
+  default     = 30
+}
+
+variable "project_name" {
+  description = "Tiền tố đặt tên cho các resource, để dễ nhận biết trên AWS Console"
+  type        = string
+  default     = "pam-gateway"
+}
+
+variable "team_ips_cidr" {
+  description = "Danh sach IP cua cac thanh vien trong nhom (dang x.x.x.x/32), duoc phep goi Control Plane API (port 8000)."
+  type        = list(string)
+}
+
+=== FILE: terraform.tfvars === 
+aws_region    = "us-east-1"
+instance_type = "t3.small"
+key_pair_name = "pam-gateway-key"
+my_ip_cidr    = "171.250.161.4/32"
+
+team_ips_cidr = [
+  "171.250.161.4/32",
+  "171.236.69.175/32",
+  "171.243.60.72/32",
+  "125.235.238.114/32",
+  "123.28.167.49/32",
+  "1.52.173.120/32",
+]
+=== FILE: README.md === 
+# Hướng dẫn deploy PAM Gateway (Guacamole + Control Plane) lên AWS bằng Terraform
+
+Làm theo đúng thứ tự từng bước dưới đây. Đừng nhảy cóc bước nào.
+
+---
+
+## Bước 0: Đợi quyền IAM có hiệu lực
+
+Đợi Hào/AWS confirm là user IAM của ní đã ở trong group admin và quyền đã propagate xong (thường vài phút sau khi thêm vào group).
+
+## Bước 1: Tạo Key Pair trên AWS Console (để SSH vào máy sau này)
+
+1. Đăng nhập AWS Console → gõ tìm "EC2" → vào trang EC2
+2. Nhìn menu bên trái, chọn **Key Pairs** (trong mục Network & Security)
+3. Bấm **Create key pair**
+4. Đặt tên: `pam-gateway-key`
+5. Type: chọn **RSA**, Format: chọn **.pem**
+6. Bấm **Create key pair** → trình duyệt sẽ tự tải file `pam-gateway-key.pem` về máy
+7. **Copy file này vào thư mục** cùng chỗ với các file Terraform (hoặc nhớ đường dẫn để dùng SSH sau)
+
+## Bước 2: Cài Terraform trên máy Windows
+
+1. Vào https://developer.hashicorp.com/terraform/install
+2. Tải bản Windows (amd64), giải nén ra, được file `terraform.exe`
+3. Copy `terraform.exe` vào 1 thư mục cố định, ví dụ `C:\terraform\`
+4. Thêm `C:\terraform\` vào biến môi trường PATH:
+   - Gõ "Environment Variables" vào Windows Search → mở "Edit the system environment variables"
+   - Bấm **Environment Variables** → tìm dòng `Path` trong "User variables" → **Edit** → **New** → gõ `C:\terraform\` → OK hết
+5. Mở PowerShell **mới** (đóng cái cũ mở lại), gõ thử: `terraform -version` — nếu ra số phiên bản là cài xong
+
+## Bước 3: Lấy IP thật của ní
+
+1. Mở trình duyệt vào: https://whatismyipaddress.com/
+2. Copy dòng "IPv4" (dạng `123.45.67.89`)
+3. Nhớ số này, lát điền vào file `terraform.tfvars`
+
+## Bước 4: Cài AWS CLI + đăng nhập
+
+1. Tải AWS CLI: https://awscli.amazonaws.com/AWSCLIV2.msi → cài như bình thường
+2. Mở PowerShell, gõ: `aws configure`
+3. Nó hỏi lần lượt, điền theo thứ tự (lấy từ IAM user của ní trên AWS Console → Security credentials → Create access key):
+   ```
+   AWS Access Key ID: <dán access key>
+   AWS Secret Access Key: <dán secret key>
+   Default region name: us-east-1
+   Default output format: json
+   ```
+
+## Bước 5: Chuẩn bị file cấu hình
+
+1. Mở thư mục chứa các file Terraform mình đưa (`main.tf`, `variables.tf`, `outputs.tf`, `user_data.sh`, `terraform.tfvars.example`)
+2. Copy file `terraform.tfvars.example` thành file mới tên `terraform.tfvars` (bỏ chữ `.example`)
+3. Mở `terraform.tfvars` bằng VS Code, sửa lại:
+   ```hcl
+   aws_region    = "us-east-1"
+   instance_type = "t3.small"
+   key_pair_name = "pam-gateway-key"
+   my_ip_cidr    = "123.45.67.89/32"   # thay bằng IP thật lấy ở Bước 3, nhớ giữ "/32" ở cuối
+   ```
+4. Lưu file (`Ctrl+S`)
+
+## Bước 6: Chạy Terraform
+
+Mở PowerShell, `cd` vào đúng thư mục chứa các file `.tf`:
+
+```powershell
+cd C:\đường-dẫn-tới-thư-mục-terraform-pam-aws
+terraform init
+```
+
+`terraform init` sẽ tải plugin AWS về — đợi xong (thường vài chục giây).
+
+Tiếp theo, xem trước Terraform định tạo gì (không tạo gì thật cả, chỉ xem trước):
+
+```powershell
+terraform plan
+```
+
+Đọc lướt qua, thấy nó liệt kê sẽ tạo: `aws_instance`, `aws_security_group`, `aws_eip` — đúng những gì mình cần.
+
+**Chạy thật** (lệnh này mới thực sự tạo resource trên AWS, sẽ tốn tiền — dùng credit free $200):
+
+```powershell
+terraform apply
+```
+
+Nó hỏi confirm, gõ `yes` rồi Enter. Đợi khoảng 1-2 phút.
+
+Xong sẽ in ra kết quả dạng:
+```
+public_ip = "3.xx.xx.xx"
+ssh_command = "ssh -i <ten-file-key.pem> ubuntu@3.xx.xx.xx"
+control_plane_url = "http://3.xx.xx.xx:8000"
+guacamole_url = "http://3.xx.xx.xx:8080/guacamole"
+```
+
+**Lưu lại IP này** — đây là địa chỉ cố định của server từ giờ trở đi.
+
+## Bước 7: SSH vào máy, kiểm tra Docker đã cài xong chưa
+
+Đợi khoảng 1-2 phút sau khi `apply` xong (để user_data script chạy xong), rồi SSH vào:
+
+```powershell
+ssh -i pam-gateway-key.pem ubuntu@<public_ip-vừa-in-ra>
+```
+
+Nếu PowerShell báo lỗi "Permissions too open" cho file `.pem`, chạy lệnh này trước (đổi đường dẫn cho đúng):
+
+```powershell
+icacls.exe pam-gateway-key.pem /reset
+icacls.exe pam-gateway-key.pem /grant:r "$($env:USERNAME):(R)"
+icacls.exe pam-gateway-key.pem /inheritance:r
+```
+
+Sau khi vào được máy, gõ:
+```bash
+docker --version
+cat user-data-done.txt
+```
+Nếu thấy có version Docker và file `user-data-done.txt` tồn tại → cài xong, sẵn sàng bước tiếp theo (đưa `docker-compose.yml` của Guacamole + Control Plane lên và chạy — mình sẽ hướng dẫn ở bước sau khi tới đó).
+
+---
+
+## Lưu ý quan trọng
+
+- **Đừng xoá file `terraform.tfstate`** sinh ra sau khi `apply` — đây là "bộ nhớ" của Terraform, biết resource nào đã tạo. Mất file này thì Terraform không biết đường xoá/sửa lại resource cũ.
+- Nhớ thêm `.gitignore` cho thư mục Terraform này (file riêng, không chung với `authorization/`):
+  ```
+  .terraform/
+  terraform.tfstate
+  terraform.tfstate.backup
+  terraform.tfvars
+  *.pem
+  ```
+  (đặc biệt `terraform.tfvars` và `*.pem` — chứa thông tin nhạy cảm, TUYỆT ĐỐI không push lên GitHub)
+- Muốn xoá sạch resource đã tạo (ví dụ deploy sai muốn làm lại): `terraform destroy`
+- Security Group hiện đang mở port 8000 và 8080 cho `0.0.0.0/0` (public) — tạm thời để cả nhóm dễ test, sau này nên siết lại chỉ cho IP của Inh/Vinh/Nghĩa thôi. Nói với Hào để bàn thêm khi cần.
+
+---
+
+## Việc CHƯA làm trong bước này (để làm sau)
+
+- Chưa đưa `docker-compose.yml` thật của Guacamole + Control Plane lên server (mới chỉ cài Docker nền)
+- Chưa đổi cấu hình app của Nghĩa/Inh để trỏ sang IP AWS mới thay vì Tailscale IP cũ
+- Chưa cấu hình domain tên (dùng tạm IP số cho gọn, scope nhỏ không cần domain)
+
+Sau khi ní chạy xong tới Bước 7 và SSH vào được, quay lại báo mình, mình hướng dẫn tiếp bước đưa Guacamole + Control Plane lên chạy.
+
+=== FILE: user_data.sh === 
+#!/bin/bash
+# Script nay chay tu dong 1 lan duy nhat khi EC2 khoi dong lan dau.
+# Cai Docker + Docker Compose, khong lam gi khac (khong tu dong clone repo
+# hay chay docker-compose up, de Nghia tu lam thu cong o buoc sau cho chac).
+
+set -e
+
+apt-get update -y
+apt-get install -y ca-certificates curl gnupg git
+
+# Cai Docker chinh chu theo huong dan Docker official
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Cho user ubuntu chay docker khong can sudo
+usermod -aG docker ubuntu
+
+# Tao san thu muc de sau nay Nghia pull code / copy docker-compose vao
+mkdir -p /home/ubuntu/pam-gateway
+chown ubuntu:ubuntu /home/ubuntu/pam-gateway
+
+echo "=== User data script hoan tat ===" > /home/ubuntu/user-data-done.txt
+

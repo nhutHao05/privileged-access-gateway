@@ -20,6 +20,65 @@
         </header>
 
         <section class="card">
+            <h2>Tạo nhóm mới</h2>
+            <p class="note">
+                Tạo đồng thời Role bên Keycloak và Group bên Control Plane
+                (2 bên phải trùng tên tuyệt đối). Sau khi tạo, vào Keycloak
+                gán role cho user, hoặc dùng mục "Tạo User" (sắp có) để
+                gán luôn từ đây.
+            </p>
+            <form hx-post="/groups/create" hx-target="#groups-table-wrapper" hx-swap="innerHTML">
+                <div class="form-row">
+                    <label>Tên nhóm (vd: PAM-DevOps)</label>
+                    <input type="text" name="name" required>
+                </div>
+                <div class="form-row">
+                    <label>Mô tả (tùy chọn)</label>
+                    <input type="text" name="description">
+                </div>
+                <button type="submit">Tạo nhóm</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <h2>Tạo User mới</h2>
+            <p class="note">
+                Password tạm do bạn đặt, user bắt buộc đổi ngay lần đăng
+                nhập đầu tiên (chuẩn PAM, không dùng password cố định).
+                Chọn Group để gán quyền luôn — Keycloak Role và Control
+                Plane Group sẽ được gán đồng thời.
+            </p>
+            <form hx-post="/users/create" hx-target="#groups-table-wrapper" hx-swap="innerHTML">
+                <div class="form-row">
+                    <label>Username</label>
+                    <input type="text" name="username" required>
+                </div>
+                <div class="form-row">
+                    <label>Email (tùy chọn)</label>
+                    <input type="email" name="email">
+                </div>
+                <div class="form-row">
+                    <label>Họ tên (tùy chọn)</label>
+                    <input type="text" name="full_name">
+                </div>
+                <div class="form-row">
+                    <label>Password tạm</label>
+                    <input type="text" name="temp_password" required>
+                </div>
+                <div class="form-row">
+                    <label>Gán vào Group</label>
+                    <select name="group_id">
+                        <option value="">-- Không gán --</option>
+                        {% for g in groups %}
+                        <option value="{{ g.id }}">{{ g.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit">Tạo User</button>
+            </form>
+        </section>
+
+        <section class="card">
             <h2>Nhóm & server được phép truy cập</h2>
             <p class="note">
                 Thành viên nhóm do Inh đồng bộ định kỳ từ Keycloak — không

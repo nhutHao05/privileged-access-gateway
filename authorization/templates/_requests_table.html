@@ -23,7 +23,7 @@
             </td>
             <td>{{ r.requested_at.strftime("%H:%M %d/%m") if r.requested_at else "—" }}</td>
             <td>
-                {% if r.status == "pending" and can_manage %}
+                {% if r.status == "pending" and is_admin %}
                 <button
                     class="btn-small btn-approve"
                     hx-post="/access-requests/{{ r.id }}/approve"

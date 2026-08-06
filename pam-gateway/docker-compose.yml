@@ -73,13 +73,15 @@ services:
   # ==========================================
   # 4. Database (Shared Postgres for KC & Guac)
   # ==========================================
-  postgres:
+    postgres:
     image: postgres:15-alpine
     container_name: pam_postgres
     environment:
       POSTGRES_USER: pam_user
       POSTGRES_PASSWORD: pam_password
       POSTGRES_MULTIPLE_DATABASES: keycloak,guacamole,pam_control
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d

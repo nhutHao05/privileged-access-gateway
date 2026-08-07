@@ -281,6 +281,7 @@ def build_group_matrix(groups, servers, policies):
                     "enabled": True, 
                     "max_duration_minutes": p.get("max_duration_minutes", 60),
                     "require_approval": p.get("require_approval", True),
+                    "allowed_actions": p.get("allowed_actions", ["connect"]),
                     "policy_id": p["id"],  # để xóa nếu cần
                 })
             else:
@@ -291,6 +292,7 @@ def build_group_matrix(groups, servers, policies):
                     "enabled": False,
                     "max_duration_minutes": 60,
                     "require_approval": True,
+                    "allowed_actions": ["connect"],
                     "policy_id": None,  # chưa có
                 })
         # Sắp xếp theo tên server cho dễ nhìn
@@ -493,6 +495,80 @@ async def reject_request_from_index(request: Request, request_id: str):
 # ---------------------------------------------------------------------------
 # Tab 2: Quản lý server (Server Management — chỉ Edit)
 # ---------------------------------------------------------------------------
+
+@app.get("/access-requests/{request_id}/actions", response_class=HTMLResponse)
+async def request_actions_partial(request: Request, request_id: str):
+    requests_raw = await api_client.list_access_requests()
+    r = next((x for x in requests_raw if str(x["id"]) == str(request_id)), None)
+    return templates.TemplateResponse(
+        request, "_request_actions.html", {"r": r, "is_admin": is_admin(request)}
+    )
+
+
+@app.get("/access-requests/{request_id}/assign-panel", response_class=HTMLResponse)
+async def assign_panel_partial(request: Request, request_id: str):
+    if not is_admin(request):
+        return HTMLResponse("Bạn không có quyền (chỉ Admin).", status_code=403)
+    groups = await api_client.get_groups()
+    return templates.TemplateResponse(
+        request, "_assign_panel.html", {"request_id": request_id, "groups": groups}
+    )
+
+
+@app.post("/access-requests/{request_id}/assign-and-approve", response_class=HTMLResponse)
+async def assign_and_approve_route(
+    request: Request, request_id: str, group_id: str = Form(...)
+):
+    can_manage = is_admin(request)
+    error = None
+    success = None
+
+    if not can_manage:
+        error = "Bạn không có quyền (chỉ Admin)."
+    else:
+        try:
+            requests_raw = await api_client.list_access_requests()
+            target = next((x for x in requests_raw if str(x["id"]) == str(request_id)), None)
+            if target is None:
+                error = "Không tìm thấy request."
+            else:
+                user_id = target["user_id"]
+                server_id = target["server_id"]
+
+                await api_client.assign_user_to_group(user_id, group_id)
+
+                policies = await api_client.list_group_server_policies()
+                enabled_server_ids = {
+                    p["server_id"] for p in policies if str(p["group_id"]) == str(group_id)
+                }
+                if server_id in enabled_server_ids:
+                    await api_client.review_access_request(request_id, status="approved")
+                    success = "Đã gán vào group và tự động duyệt request."
+                else:
+                    success = (
+                        "Đã gán vào group nhưng chưa tự duyệt được — cần cấp quyền server "
+                        "tương ứng ở tab Nhóm & phân quyền."
+                    )
+        except Exception as exc:
+            error = _error_message(exc)
+
+    servers = await api_client.get_servers()
+    requests_raw = await api_client.list_access_requests()
+    users = await api_client.get_users()
+    access_requests = [attach_request_display(x, servers, users) for x in reversed(requests_raw)]
+
+    return templates.TemplateResponse(
+        request,
+        "_request_response.html",
+        {
+            "error": error,
+            "success": success,
+            "access_requests": access_requests,
+            "is_admin": can_manage,
+        },
+        status_code=403 if not can_manage else 200,
+    )
+
 
 @app.get("/servers", response_class=HTMLResponse)
 async def servers_page(request: Request):
@@ -888,6 +964,7 @@ async def save_group_server_policy(
     enabled: str = Form(None),
     max_duration_minutes: str = Form("60"),
     requires_approval: str = Form(None),
+    allowed_actions: list[str] = Form([]),
 ):
     can_manage = is_admin(request)
     if not can_manage:
@@ -920,8 +997,9 @@ async def save_group_server_policy(
                 server_id=server_id,
                 max_duration_minutes=duration_int,
                 require_approval=requires_approval == "on",
+                allowed_actions=allowed_actions or ["connect"],
             )
-            success = "Đã lưu chính sách thành công!" 
+            success = "Đã lưu chính sách thành công!"
         else:
             policies = await api_client.list_group_server_policies()
             existing = get_policy(policies, group_id, server_id)

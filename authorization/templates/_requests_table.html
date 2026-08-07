@@ -24,21 +24,19 @@
                 <span class="badge badge-{{ r.status }}">{{ r.status }}</span>
             </td>
             <td>{{ r.requested_at.strftime("%H:%M %d/%m") if r.requested_at else "—" }}</td>
-            <td>
+            <td id="request-actions-{{ r.id }}">
                 {% if r.status == "pending" and is_admin %}
-                <a
-                    class="btn-small btn-approve"
-                    style="text-decoration:none; display:inline-block;"
-                    href="/groups?highlight_user={{ r.user_id }}"
-                >
+                <button class="btn-small btn-approve"
+                        style="border:none; cursor:pointer;"
+                        hx-get="/access-requests/{{ r.id }}/assign-panel"
+                        hx-target="#request-actions-{{ r.id }}"
+                        hx-swap="innerHTML">
                     Phân quyền
-                </a>
-                <button
-                    class="btn-small btn-reject"
-                    hx-post="/access-requests/{{ r.id }}/reject"
-                    hx-target="#requests-table-wrapper"
-                    hx-swap="innerHTML"
-                >
+                </button>
+                <button class="btn-small btn-reject"
+                        hx-post="/access-requests/{{ r.id }}/reject"
+                        hx-target="#requests-table-wrapper"
+                        hx-swap="innerHTML">
                     Từ chối
                 </button>
                 {% elif r.status == "pending" %}

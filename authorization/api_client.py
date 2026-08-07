@@ -158,19 +158,21 @@ async def save_group_server_policy(
     server_id: str,
     max_duration_minutes: int = 60,
     require_approval: bool = True,
+    allowed_actions: list[str] | None = None,
 ) -> dict:
     """
-    Táº¡o/cáº­p nháº­t policy cho cáº·p (group_id, server_id).
-
-    Backend tháº­t CHÆ¯A cÃ³ PATCH/PUT Ä‘á»ƒ sá»­a policy, nÃªn náº¿u policy Ä‘Ã£
-    tá»“n táº¡i (theo group_id+server_id) thÃ¬ pháº£i XÃ“A Ä‘i rá»“i Táº O Láº I â€”
-    náº¿u khÃ´ng sáº½ bá»‹ lá»—i 400 "Policy Ä‘Ã£ tá»“n táº¡i".
+    Tạo/cập nhật policy cho cặp (group_id, server_id).
+    Backend Inh đã thêm PUT để sửa policy, không cần xóa-tạo-lại nữa.
     """
+    if allowed_actions is None:
+        allowed_actions = ["connect"]
+
     if USE_MOCK:
         for p in _MOCK_POLICIES:
             if p["group_id"] == group_id and p["server_id"] == server_id:
                 p["max_duration_minutes"] = max_duration_minutes
                 p["require_approval"] = require_approval
+                p["allowed_actions"] = allowed_actions
                 return p
         new_pol = {
             "id": f"p-{uuid.uuid4().hex[:6]}",
@@ -178,6 +180,7 @@ async def save_group_server_policy(
             "server_id": server_id,
             "max_duration_minutes": max_duration_minutes,
             "require_approval": require_approval,
+            "allowed_actions": allowed_actions,
         }
         _MOCK_POLICIES.append(new_pol)
         return new_pol
@@ -188,17 +191,18 @@ async def save_group_server_policy(
         None,
     )
 
-    if existing:
-        await delete_group_server_policy(existing["id"])
-
     payload = {
         "group_id": group_id,
         "server_id": server_id,
         "max_duration_minutes": max_duration_minutes,
         "require_approval": require_approval,
+        "allowed_actions": allowed_actions,
     }
-    return await _request("POST", "/policy/group-server/", json=payload)
 
+    if existing:
+        return await _request("PUT", f"/policy/group-server/{existing['id']}", json=payload)
+
+    return await _request("POST", "/policy/group-server/", json=payload)
 
 async def delete_group_server_policy(policy_id: str) -> None:
     """DELETE {BASE_URL}/policy/group-server/{policy_id}"""

@@ -338,7 +338,7 @@ def _parse_dt(value):
     return dt
 
 
-def attach_request_display(r: dict, servers: list[dict]) -> dict:
+def attach_request_display(r: dict, servers: list[dict], users: list[dict] | None = None) -> dict:
     server = next((s for s in servers if s["id"] == r.get("server_id")), None)
     guac_url = ""
     if server and server.get("guacamole_connection_id"):
@@ -346,9 +346,13 @@ def attach_request_display(r: dict, servers: list[dict]) -> dict:
         token = f"{server['guacamole_connection_id']}\0c\0postgresql"
         encoded = base64.b64encode(token.encode()).decode()
         guac_url = f"{GUACAMOLE_BASE_URL}/#/client/{encoded}"
+    requester = None
+    if users:
+        requester = next((u for u in users if str(u["id"]) == str(r.get("user_id"))), None)
     return {
         **r,
         "server": server,
+        "requester": requester,
         "requested_minutes": r.get("requested_minutes") or r.get("duration_minutes") or 0,
         "requested_at": _parse_dt(r.get("created_at") or r.get("requested_at")),
         "guac_url": guac_url,
@@ -364,13 +368,15 @@ async def admin_dashboard(request: Request):
     load_error = None
     requests_raw = []
     servers = []
+    users = []
     try:
         servers = await api_client.get_servers()
         requests_raw = await api_client.list_access_requests()
+        users = await api_client.get_users()
     except Exception as exc:
         load_error = _error_message(exc)
 
-    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+    access_requests = [attach_request_display(r, servers, users) for r in reversed(requests_raw)]
 
     return templates.TemplateResponse(
         request,
@@ -439,7 +445,8 @@ async def approve_request_from_index(request: Request, request_id: str):
 
     servers = await api_client.get_servers()
     requests_raw = await api_client.list_access_requests()
-    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+    users = await api_client.get_users()
+    access_requests = [attach_request_display(r, servers, users) for r in reversed(requests_raw)]
 
     return templates.TemplateResponse(
         request,
@@ -469,7 +476,8 @@ async def reject_request_from_index(request: Request, request_id: str):
 
     servers = await api_client.get_servers()
     requests_raw = await api_client.list_access_requests()
-    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+    users = await api_client.get_users()
+    access_requests = [attach_request_display(r, servers, users) for r in reversed(requests_raw)]
 
     return templates.TemplateResponse(
         request,
@@ -720,7 +728,7 @@ async def revoke_grant_route(request: Request, grant_id: str):
 # ---------------------------------------------------------------------------
 
 @app.get("/groups", response_class=HTMLResponse)
-async def groups_page(request: Request):
+async def groups_page(request: Request, highlight_user: str | None = None):
     if not is_admin(request):
         return RedirectResponse(url="/portal")
 
@@ -745,6 +753,7 @@ async def groups_page(request: Request):
             "error": error,
             "success": None,
             "is_admin": is_admin(request),
+            "highlight_user": highlight_user,
         },
     )
 
@@ -834,6 +843,25 @@ async def assign_user_to_group_route(request: Request, user_id: str, group_id: s
     try:
         await api_client.assign_user_to_group(user_id, group_id)
         success = "Đã gán user vào group."
+
+        try:
+            policies = await api_client.list_group_server_policies()
+            enabled_server_ids = {
+                p["server_id"] for p in policies if str(p["group_id"]) == str(group_id)
+            }
+            requests_raw = await api_client.list_access_requests()
+            pending = [
+                r for r in requests_raw
+                if str(r.get("user_id")) == str(user_id)
+                and r.get("status") == "pending"
+                and r.get("server_id") in enabled_server_ids
+            ]
+            for r in pending:
+                await api_client.review_access_request(r["id"], status="approved")
+            if pending:
+                success += f" Đã tự động duyệt {len(pending)} request đang chờ."
+        except Exception:
+            pass
     except Exception as exc:
         error = _error_message(exc)
 
@@ -934,21 +962,7 @@ async def user_portal(request: Request):
     try:
         current_user_id = await _get_current_user_id(request)
 
-        all_servers = await api_client.get_servers()
-        groups = await api_client.get_groups()
-        policies = await api_client.list_group_server_policies()
-
-        # Tìm các group mà user hiện tại là thành viên
-        my_group_ids = [
-            g["id"] for g in groups
-            if current_user_id in [u["id"] for u in g.get("users", [])]
-        ]
-
-        # Chỉ giữ lại server mà 1 trong các group của user có Policy
-        allowed_server_ids = {
-            p["server_id"] for p in policies if p["group_id"] in my_group_ids
-        }
-        servers = [s for s in all_servers if s["id"] in allowed_server_ids]
+        servers = await api_client.get_servers()
 
         # Chỉ lấy grants của user đang đăng nhập
         grants_display = await _load_grants_display(current_user_id)
@@ -959,7 +973,7 @@ async def user_portal(request: Request):
             requests_raw = [
                 r for r in requests_raw if str(r.get("user_id")) == str(current_user_id)
             ]
-        access_requests = [attach_request_display(r, all_servers) for r in reversed(requests_raw)]
+        access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
     except Exception as exc:
         load_error = _error_message(exc)
 

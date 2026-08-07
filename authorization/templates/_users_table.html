@@ -19,7 +19,7 @@
     </thead>
     <tbody>
         {% for u in users %}
-        <tr>
+        <tr id="user-row-{{ u.id }}" {% if highlight_user is defined and highlight_user and highlight_user == u.id|string %}class="row-highlight"{% endif %}>
             <td>{{ u.username }}</td>
             <td>{{ u.email or "—" }}</td>
             <td>{{ u.full_name or "—" }}</td>
@@ -45,4 +45,10 @@
         {% endfor %}
     </tbody>
 </table>
+{% endif %}
+{% if highlight_user is defined and highlight_user %}
+<script>
+  var el = document.getElementById("user-row-{{ highlight_user }}");
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+</script>
 {% endif %}

@@ -59,6 +59,7 @@ class GroupServerPolicy(Base):
     server_id = Column(UUID(as_uuid=True), ForeignKey('servers.id'), nullable=False)
     max_duration_minutes = Column(Integer, default=60, nullable=False)
     require_approval = Column(Boolean, default=True, nullable=False)
+    allowed_actions = Column(ARRAY(String), default=["connect"], nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class AccessRequest(Base):

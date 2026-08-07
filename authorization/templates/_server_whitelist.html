@@ -1,0 +1,45 @@
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert alert-success">{{ success }}</div>{% endif %}
+
+<table>
+  <thead>
+    <tr>
+      <th>User</th>
+      <th>Email</th>
+      {% if is_admin %}<th></th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for w in whitelist %}
+    <tr>
+      <td>{{ w.user.username if w.user else w.user_id }}</td>
+      <td>{{ w.user.email if w.user else "" }}</td>
+      {% if is_admin %}
+      <td>
+        <button hx-delete="/servers/{{ server_id }}/whitelist/{{ w.user_id }}"
+                hx-target="#whitelist-panel-{{ server_id }}"
+                hx-swap="innerHTML">
+          Gỡ
+        </button>
+      </td>
+      {% endif %}
+    </tr>
+    {% else %}
+    <tr><td colspan="3">Chưa có user nào trong whitelist.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if is_admin %}
+<form hx-post="/servers/{{ server_id }}/whitelist"
+      hx-target="#whitelist-panel-{{ server_id }}"
+      hx-swap="innerHTML">
+  <select name="user_id" required>
+    <option value="" disabled selected>-- Chọn user --</option>
+    {% for u in users %}
+    <option value="{{ u.id }}">{{ u.username }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Thêm vào whitelist</button>
+</form>
+{% endif %}

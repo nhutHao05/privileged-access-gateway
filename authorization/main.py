@@ -667,6 +667,115 @@ async def edit_server(
 
 
 # ---------------------------------------------------------------------------
+# Tab 2b: Whitelist user theo server (server_whitelist)
+# ---------------------------------------------------------------------------
+
+@app.get("/servers/{server_id}/whitelist-panel", response_class=HTMLResponse)
+async def server_whitelist_panel(request: Request, server_id: str):
+    """Trả về panel whitelist (danh sách user đã whitelist + form thêm) cho 1 server."""
+    error = None
+    whitelist = []
+    users = []
+    try:
+        whitelist = await api_client.get_server_whitelist(server_id)
+        users = await api_client.get_users()
+    except Exception as exc:
+        error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "_server_whitelist.html",
+        {
+            "server_id": server_id,
+            "whitelist": whitelist,
+            "users": users,
+            "error": error,
+            "is_admin": is_admin(request),
+        },
+    )
+
+
+@app.post("/servers/{server_id}/whitelist", response_class=HTMLResponse)
+async def add_to_whitelist_route(
+    request: Request,
+    server_id: str,
+    user_id: str = Form(...),
+):
+    can_manage = is_admin(request)
+    error = None
+    success = None
+
+    if not can_manage:
+        error = "Bạn không có quyền (chỉ Admin)."
+    else:
+        try:
+            await api_client.add_user_to_whitelist(server_id, user_id)
+            success = "Đã thêm user vào whitelist."
+        except Exception as exc:
+            error = _error_message(exc)
+
+    whitelist = []
+    users = []
+    try:
+        whitelist = await api_client.get_server_whitelist(server_id)
+        users = await api_client.get_users()
+    except Exception as exc2:
+        error = error or _error_message(exc2)
+
+    return templates.TemplateResponse(
+        request,
+        "_server_whitelist.html",
+        {
+            "server_id": server_id,
+            "whitelist": whitelist,
+            "users": users,
+            "error": error,
+            "success": success,
+            "is_admin": can_manage,
+        },
+        status_code=403 if not can_manage else 200,
+    )
+
+
+@app.delete("/servers/{server_id}/whitelist/{user_id}", response_class=HTMLResponse)
+async def remove_from_whitelist_route(request: Request, server_id: str, user_id: str):
+    can_manage = is_admin(request)
+    error = None
+    success = None
+
+    if not can_manage:
+        error = "Bạn không có quyền (chỉ Admin)."
+    else:
+        try:
+            await api_client.remove_user_from_whitelist(server_id, user_id)
+            success = "Đã gỡ user khỏi whitelist."
+        except Exception as exc:
+            error = _error_message(exc)
+
+    whitelist = []
+    users = []
+    try:
+        whitelist = await api_client.get_server_whitelist(server_id)
+        users = await api_client.get_users()
+    except Exception as exc2:
+        error = error or _error_message(exc2)
+
+    return templates.TemplateResponse(
+        request,
+        "_server_whitelist.html",
+        {
+            "server_id": server_id,
+            "whitelist": whitelist,
+            "users": users,
+            "error": error,
+            "success": success,
+            "is_admin": can_manage,
+        },
+        status_code=403 if not can_manage else 200,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Tab 3: Quyền đang active (Active Grants)
 # ---------------------------------------------------------------------------
 

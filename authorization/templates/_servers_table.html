@@ -13,6 +13,7 @@
             <th>IP</th>
             <th>Giao thức</th>
             <th>Tag</th>
+            <th>Whitelist</th>
             <th></th>
         </tr>
     </thead>
@@ -50,6 +51,7 @@
                     placeholder="VD: prod, db"
                 />
             </td>
+            <td>—</td>
             <td>
                 <button
                     class="btn-small btn-approve"
@@ -87,6 +89,17 @@
                 {% for tag in s.tags or [] %}
                 <span class="tag-chip">{{ tag }}</span>
                 {% endfor %}
+            </td>
+            <td>
+                <button
+                    class="btn-small"
+                    hx-get="/servers/{{ s.id }}/whitelist-panel"
+                    hx-target="#whitelist-panel-{{ s.id }}"
+                    hx-swap="innerHTML"
+                >
+                    Whitelist
+                </button>
+                <div id="whitelist-panel-{{ s.id }}"></div>
             </td>
             <td>
                 {% if is_admin %}

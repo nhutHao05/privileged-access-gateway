@@ -211,7 +211,47 @@ async def delete_group_server_policy(policy_id: str) -> None:
         return
     await _request("DELETE", f"/policy/group-server/{policy_id}")
 
+# ---------------------------------------------------------------------------
+# Server whitelist (danh sách user_id cụ thể được ssh vào 1 server)
+# ---------------------------------------------------------------------------
 
+_MOCK_WHITELIST: list[dict] = []
+
+
+async def get_server_whitelist(server_id: str) -> list[dict]:
+    """GET {BASE_URL}/servers/{server_id}/whitelist"""
+    if USE_MOCK:
+        return [w for w in _MOCK_WHITELIST if w["server_id"] == server_id]
+    return await _request("GET", f"/servers/{server_id}/whitelist")
+
+
+async def add_user_to_whitelist(server_id: str, user_id: str) -> dict:
+    """POST {BASE_URL}/servers/{server_id}/whitelist  body: {"user_id": "..."}"""
+    if USE_MOCK:
+        entry = {
+            "id": f"wl-{uuid.uuid4().hex[:6]}",
+            "server_id": server_id,
+            "user_id": user_id,
+            "user": {"id": user_id, "username": "mock_user", "email": "mock@example.com"},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _MOCK_WHITELIST.append(entry)
+        return entry
+    return await _request(
+        "POST", f"/servers/{server_id}/whitelist", json={"user_id": user_id}
+    )
+
+
+async def remove_user_from_whitelist(server_id: str, user_id: str) -> None:
+    """DELETE {BASE_URL}/servers/{server_id}/whitelist/{user_id}"""
+    if USE_MOCK:
+        _MOCK_WHITELIST[:] = [
+            w for w in _MOCK_WHITELIST
+            if not (w["server_id"] == server_id and w["user_id"] == user_id)
+        ]
+        return
+    await _request("DELETE", f"/servers/{server_id}/whitelist/{user_id}")
+    
 # ---------------------------------------------------------------------------
 # Access requests
 # ---------------------------------------------------------------------------

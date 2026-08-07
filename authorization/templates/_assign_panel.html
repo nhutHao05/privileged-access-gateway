@@ -1,0 +1,19 @@
+<form hx-post="/access-requests/{{ request_id }}/assign-and-approve"
+      hx-target="#requests-table-wrapper"
+      hx-swap="innerHTML">
+    <select name="group_id" required>
+        <option value="">-- Chọn group --</option>
+        {% for g in groups %}
+        <option value="{{ g.id }}">{{ g.name }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit" class="btn-small btn-approve" style="border:none; cursor:pointer;">
+        Xác nhận
+    </button>
+    <button type="button" class="btn-small"
+            hx-get="/access-requests/{{ request_id }}/actions"
+            hx-target="#request-actions-{{ request_id }}"
+            hx-swap="innerHTML">
+        Hủy
+    </button>
+</form>

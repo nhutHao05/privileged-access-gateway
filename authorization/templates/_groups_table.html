@@ -55,6 +55,7 @@
             <tr>
                 <th>Server</th>
                 <th>Được phép</th>
+                <th>Quyền hạn</th>
                 <th>Thời lượng tối đa (phút)</th>
                 <th>Cần duyệt</th>
                 <th>Thao tác</th>
@@ -66,6 +67,28 @@
                 <td>{{ sp.server_name }}</td>
                 <td class="checkbox-cell">
                     <input type="checkbox" name="enabled" {% if sp.enabled %}checked{% endif %} {% if not is_admin %}disabled{% endif %} />
+                </td>
+                <td class="checkbox-cell" style="white-space:nowrap;">
+                    <label style="margin-right:6px;">
+                        <input type="checkbox" name="allowed_actions" value="connect"
+                            {% if 'connect' in sp.allowed_actions %}checked{% endif %}
+                            {% if not is_admin %}disabled{% endif %} /> Connect
+                    </label>
+                    <label style="margin-right:6px;">
+                        <input type="checkbox" name="allowed_actions" value="view_only"
+                            {% if 'view_only' in sp.allowed_actions %}checked{% endif %}
+                            {% if not is_admin %}disabled{% endif %} /> View Only
+                    </label>
+                    <label style="margin-right:6px;">
+                        <input type="checkbox" name="allowed_actions" value="manage_policy"
+                            {% if 'manage_policy' in sp.allowed_actions %}checked{% endif %}
+                            {% if not is_admin %}disabled{% endif %} /> Manage Policy
+                    </label>
+                    <label>
+                        <input type="checkbox" name="allowed_actions" value="audit"
+                            {% if 'audit' in sp.allowed_actions %}checked{% endif %}
+                            {% if not is_admin %}disabled{% endif %} /> Audit
+                    </label>
                 </td>
                 <td>
                     <input

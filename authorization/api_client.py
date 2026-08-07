@@ -158,7 +158,51 @@ async def save_group_server_policy(
     server_id: str,
     max_duration_minutes: int = 60,
     require_approval: bool = True,
+    allowed_actions: list[str] | None = None,
 ) -> dict:
+    """
+    Tạo/cập nhật policy cho cặp (group_id, server_id).
+    Backend Inh đã thêm PUT để sửa policy, không cần xóa-tạo-lại nữa.
+    """
+    if allowed_actions is None:
+        allowed_actions = ["connect"]
+
+    if USE_MOCK:
+        for p in _MOCK_POLICIES:
+            if p["group_id"] == group_id and p["server_id"] == server_id:
+                p["max_duration_minutes"] = max_duration_minutes
+                p["require_approval"] = require_approval
+                p["allowed_actions"] = allowed_actions
+                return p
+        new_pol = {
+            "id": f"p-{uuid.uuid4().hex[:6]}",
+            "group_id": group_id,
+            "server_id": server_id,
+            "max_duration_minutes": max_duration_minutes,
+            "require_approval": require_approval,
+            "allowed_actions": allowed_actions,
+        }
+        _MOCK_POLICIES.append(new_pol)
+        return new_pol
+
+    existing_policies = await list_group_server_policies()
+    existing = next(
+        (p for p in existing_policies if p["group_id"] == group_id and p["server_id"] == server_id),
+        None,
+    )
+
+    payload = {
+        "group_id": group_id,
+        "server_id": server_id,
+        "max_duration_minutes": max_duration_minutes,
+        "require_approval": require_approval,
+        "allowed_actions": allowed_actions,
+    }
+
+    if existing:
+        return await _request("PUT", f"/policy/group-server/{existing['id']}", json=payload)
+
+    return await _request("POST", "/policy/group-server/", json=payload)
     """
     Táº¡o/cáº­p nháº­t policy cho cáº·p (group_id, server_id).
 

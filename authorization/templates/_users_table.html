@@ -1,0 +1,54 @@
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+{% if not users %}
+<p class="empty">Chưa có user nào.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Họ tên</th>
+            <th>Gán vào Group</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for u in users %}
+        <tr id="user-row-{{ u.id }}" {% if highlight_user is defined and highlight_user and highlight_user == u.id|string %}class="row-highlight"{% endif %}>
+            <td>{{ u.username }}</td>
+            <td>{{ u.email or "—" }}</td>
+            <td>{{ u.full_name or "—" }}</td>
+            <td>
+                {% if is_admin %}
+                <form
+                    hx-post="/users/{{ u.id }}/assign-group"
+                    hx-target="#users-table-wrapper"
+                    hx-swap="innerHTML"
+                    style="display:flex; gap:6px; align-items:center;"
+                >
+                    <select name="group_id" required>
+                        <option value="">-- Chọn group --</option>
+                        {% for g in groups %}
+                        <option value="{{ g.id }}">{{ g.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn-small">Gán</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% if highlight_user is defined and highlight_user %}
+<script>
+  var el = document.getElementById("user-row-{{ highlight_user }}");
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+</script>
+{% endif %}

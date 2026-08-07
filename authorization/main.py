@@ -17,6 +17,8 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 import api_client
 
@@ -276,7 +278,7 @@ def build_group_matrix(groups, servers, policies):
                 server_policies.append({
                     "server_id": s["id"],
                     "server_name": s["name"],
-                    "enabled": p.get("enabled", False),
+                    "enabled": True, 
                     "max_duration_minutes": p.get("max_duration_minutes", 60),
                     "require_approval": p.get("require_approval", True),
                     "policy_id": p["id"],  # để xóa nếu cần
@@ -336,7 +338,7 @@ def _parse_dt(value):
     return dt
 
 
-def attach_request_display(r: dict, servers: list[dict]) -> dict:
+def attach_request_display(r: dict, servers: list[dict], users: list[dict] | None = None) -> dict:
     server = next((s for s in servers if s["id"] == r.get("server_id")), None)
     guac_url = ""
     if server and server.get("guacamole_connection_id"):
@@ -344,9 +346,13 @@ def attach_request_display(r: dict, servers: list[dict]) -> dict:
         token = f"{server['guacamole_connection_id']}\0c\0postgresql"
         encoded = base64.b64encode(token.encode()).decode()
         guac_url = f"{GUACAMOLE_BASE_URL}/#/client/{encoded}"
+    requester = None
+    if users:
+        requester = next((u for u in users if str(u["id"]) == str(r.get("user_id"))), None)
     return {
         **r,
         "server": server,
+        "requester": requester,
         "requested_minutes": r.get("requested_minutes") or r.get("duration_minutes") or 0,
         "requested_at": _parse_dt(r.get("created_at") or r.get("requested_at")),
         "guac_url": guac_url,
@@ -362,13 +368,15 @@ async def admin_dashboard(request: Request):
     load_error = None
     requests_raw = []
     servers = []
+    users = []
     try:
         servers = await api_client.get_servers()
         requests_raw = await api_client.list_access_requests()
+        users = await api_client.get_users()
     except Exception as exc:
         load_error = _error_message(exc)
 
-    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+    access_requests = [attach_request_display(r, servers, users) for r in reversed(requests_raw)]
 
     return templates.TemplateResponse(
         request,
@@ -437,7 +445,8 @@ async def approve_request_from_index(request: Request, request_id: str):
 
     servers = await api_client.get_servers()
     requests_raw = await api_client.list_access_requests()
-    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+    users = await api_client.get_users()
+    access_requests = [attach_request_display(r, servers, users) for r in reversed(requests_raw)]
 
     return templates.TemplateResponse(
         request,
@@ -467,7 +476,8 @@ async def reject_request_from_index(request: Request, request_id: str):
 
     servers = await api_client.get_servers()
     requests_raw = await api_client.list_access_requests()
-    access_requests = [attach_request_display(r, servers) for r in reversed(requests_raw)]
+    users = await api_client.get_users()
+    access_requests = [attach_request_display(r, servers, users) for r in reversed(requests_raw)]
 
     return templates.TemplateResponse(
         request,
@@ -550,24 +560,23 @@ async def edit_server(
     server_id: str,
     name: str = Form(None),
     ip: str = Form(None),
+    protocol: str = Form(None),
     tags: str = Form(None),
 ):
     can_manage = is_admin(request)
     error = None
     success = None
     tags_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-
     if not can_manage:
         error = "Bạn không có quyền (chỉ Admin)."
     else:
         try:
-            await api_client.update_server(server_id, name=name, ip=ip, tags=tags_list)
+            await api_client.update_server(server_id, name=name, ip=ip, protocol=protocol, tags=tags_list)
             success = "Cập nhật server thành công!"
         except Exception as exc:
             error = _error_message(exc)
 
     servers = await api_client.get_servers()
-
     return templates.TemplateResponse(
         request,
         "_servers_table.html",
@@ -575,7 +584,6 @@ async def edit_server(
             "servers": servers,
             "editing_id": None,
             "error": error,
-            "success": success,
             "is_admin": can_manage,
         },
         status_code=403 if not can_manage else 200,
@@ -694,7 +702,11 @@ async def revoke_grant_route(request: Request, grant_id: str):
         error = "Bạn không có quyền (chỉ Admin)."
     else:
         try:
-            await api_client.revoke_grant(grant_id)
+            # revoke_grant_and_kill() tự lo cả revoke bên Control Plane
+            # lẫn kill session Guacamole tương ứng (tra guacamole_connection_id
+            # từ grant -> server), nên không cần lặp lại logic kill ở đây nữa.
+            await api_client.revoke_grant_and_kill(grant_id)
+
         except Exception as exc:
             error = _error_message(exc)
 
@@ -716,17 +728,19 @@ async def revoke_grant_route(request: Request, grant_id: str):
 # ---------------------------------------------------------------------------
 
 @app.get("/groups", response_class=HTMLResponse)
-async def groups_page(request: Request):
+async def groups_page(request: Request, highlight_user: str | None = None):
     if not is_admin(request):
         return RedirectResponse(url="/portal")
 
     error = None
     group_matrix = []
+    users = []
     try:
         groups = await api_client.get_groups()
         servers = await api_client.get_servers()
         policies = await api_client.list_group_server_policies()
         group_matrix = build_group_matrix(groups, servers, policies)
+        users = await api_client.get_users()
     except Exception as exc:
         error = _error_message(exc)
 
@@ -735,9 +749,11 @@ async def groups_page(request: Request):
         "groups.html",
         {
             "groups": group_matrix,
+            "users": users,
             "error": error,
             "success": None,
             "is_admin": is_admin(request),
+            "highlight_user": highlight_user,
         },
     )
 
@@ -784,7 +800,6 @@ async def create_user_route(
     email: str = Form(None),
     full_name: str = Form(None),
     temp_password: str = Form(...),
-    group_id: str = Form(None),
 ):
     error = None
     success = None
@@ -796,35 +811,74 @@ async def create_user_route(
             kc_user_id = await keycloak_admin.create_user(
                 username, email, full_name, temp_password
             )
-            cp_user = await api_client.create_user_backend(
-    username, email, full_name, keycloak_sub=kc_user_id
-)
-
-            if group_id:
-                groups = await api_client.get_groups()
-                group = next((g for g in groups if g["id"] == group_id), None)
-                if group:
-                    await keycloak_admin.assign_realm_role_to_user(kc_user_id, group["name"])
-                    await api_client.assign_user_to_group(cp_user["id"], group_id)
-
-            success = f"Đã tạo user '{username}' thành công (password tạm, bắt buộc đổi khi đăng nhập lần đầu)."
+            await api_client.create_user_backend(
+                username, email, full_name, keycloak_sub=kc_user_id
+            )
+            success = f"Đã tạo user '{username}'. Xuống 'Danh sách User' để gán vào group."
         except Exception as exc:
             error = _error_message(exc)
 
+    users = await api_client.get_users()
     groups = await api_client.get_groups()
-    servers = await api_client.get_servers()
-    policies = await api_client.list_group_server_policies()
 
     return templates.TemplateResponse(
         request,
-        "_groups_table.html",
+        "_users_table.html",
         {
-            "groups": build_group_matrix(groups, servers, policies),
+            "users": users,
+            "groups": groups,
             "error": error,
             "success": success,
+            "is_admin": is_admin(request),
         },
     )
 
+@app.post("/users/{user_id}/assign-group", response_class=HTMLResponse)
+async def assign_user_to_group_route(request: Request, user_id: str, group_id: str = Form(...)):
+    if not is_admin(request):
+        return JSONResponse(status_code=403, content={"error": "Chỉ Admin mới được gán user vào group."})
+
+    error = None
+    success = None
+    try:
+        await api_client.assign_user_to_group(user_id, group_id)
+        success = "Đã gán user vào group."
+
+        try:
+            policies = await api_client.list_group_server_policies()
+            enabled_server_ids = {
+                p["server_id"] for p in policies if str(p["group_id"]) == str(group_id)
+            }
+            requests_raw = await api_client.list_access_requests()
+            pending = [
+                r for r in requests_raw
+                if str(r.get("user_id")) == str(user_id)
+                and r.get("status") == "pending"
+                and r.get("server_id") in enabled_server_ids
+            ]
+            for r in pending:
+                await api_client.review_access_request(r["id"], status="approved")
+            if pending:
+                success += f" Đã tự động duyệt {len(pending)} request đang chờ."
+        except Exception:
+            pass
+    except Exception as exc:
+        error = _error_message(exc)
+
+    users = await api_client.get_users()
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+    group_matrix = build_group_matrix(groups, servers, policies)
+
+    users_html = templates.env.get_template("_users_table.html").render(
+        {"request": request, "users": users, "groups": groups, "error": error, "success": success, "is_admin": True}
+    )
+    groups_html = templates.env.get_template("_groups_table.html").render(
+        {"request": request, "groups": group_matrix, "error": None, "success": None, "is_admin": True}
+    )
+    combined = users_html + f'<div id="groups-table-wrapper" hx-swap-oob="true">{groups_html}</div>'
+    return HTMLResponse(combined)
 
 @app.post("/groups/{group_id}/servers/{server_id}/policy", response_class=HTMLResponse)
 async def save_group_server_policy(
@@ -906,8 +960,9 @@ async def user_portal(request: Request):
     access_requests = []
 
     try:
-        servers = await api_client.get_servers()
         current_user_id = await _get_current_user_id(request)
+
+        servers = await api_client.get_servers()
 
         # Chỉ lấy grants của user đang đăng nhập
         grants_display = await _load_grants_display(current_user_id)
@@ -933,21 +988,7 @@ async def user_portal(request: Request):
         },
     )
 
-@app.post("/policy/create")
-async def create_policy_route(
-    request: Request,
-    group_id: str = Form(...),
-    server_id: str = Form(...),
-    policy: str = Form("allow"),
-    duration: int = Form(60),
-):
-    if not is_admin(request):
-        return {"error": "Chỉ Admin mới được tạo Policy."}
-    try:
-        result = await api_client.create_policy(group_id, server_id, policy, duration)
-        return {"success": True, "message": "Tạo Policy thành công!"}
-    except Exception as e:
-        return {"error": str(e)}
+
 
 @app.delete("/policy/{policy_id}")
 async def delete_policy_route(request: Request, policy_id: str):
@@ -967,3 +1008,103 @@ async def delete_policy_route(request: Request, policy_id: str):
         )
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": _error_message(exc)})
+
+@app.delete("/groups/{group_id}")
+async def delete_group_route(request: Request, group_id: str):
+    if not is_admin(request):
+        return JSONResponse(status_code=403, content={"error": "Chỉ Admin mới được xóa Group."})
+    error = None
+    try:
+        await api_client.delete_group_backend(group_id)
+    except Exception as exc:
+        error = _error_message(exc)
+
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+    return templates.TemplateResponse(
+        request,
+        "_groups_table.html",
+        {
+            "groups": build_group_matrix(groups, servers, policies),
+            "error": error,
+            "success": None if error else "Đã xóa group.",
+            "is_admin": True,
+        },
+    )
+
+@app.delete("/groups/{group_id}/users/{user_id}")
+async def remove_user_from_group_route(request: Request, group_id: str, user_id: str):
+    if not is_admin(request):
+        return JSONResponse(status_code=403, content={"error": "Chỉ Admin mới được gỡ user."})
+    error = None
+    try:
+        await api_client.remove_user_from_group(user_id, group_id)
+    except Exception as exc:
+        error = _error_message(exc)
+
+    groups = await api_client.get_groups()
+    servers = await api_client.get_servers()
+    policies = await api_client.list_group_server_policies()
+    return templates.TemplateResponse(
+        request,
+        "_groups_table.html",
+        {
+            "groups": build_group_matrix(groups, servers, policies),
+            "error": error,
+            "success": None if error else "Đã gỡ user khỏi group.",
+            "is_admin": True,
+        },
+    )
+
+def attach_audit_display(a: dict, servers: list[dict], users: list[dict]) -> dict:
+    server = next((s for s in servers if s["id"] == a.get("server_id")), None)
+    user = next((u for u in users if u["id"] == a.get("user_id")), None)
+    return {
+        **a,
+        "server_name": server["name"] if server else a.get("server_id"),
+        "username": user["username"] if user else a.get("user_id"),
+        "started_at": _parse_dt(a.get("start_time")),
+        "ended_at": _parse_dt(a.get("end_time")),
+    }
+
+
+@app.get("/audit-log", response_class=HTMLResponse)
+async def audit_log_page(request: Request):
+    if not is_admin(request):
+        return RedirectResponse(url="/portal")
+
+    error = None
+    audit_display = []
+    try:
+        sessions = await api_client.get_audit_sessions()
+        servers = await api_client.get_servers()
+        users = await api_client.get_users()
+        audit_display = [attach_audit_display(a, servers, users) for a in reversed(sessions)]
+    except Exception as exc:
+        error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "audit_log.html",
+        {"audit_sessions": audit_display, "error": error, "is_admin": True},
+    )
+
+
+@app.get("/audit-log/table", response_class=HTMLResponse)
+async def audit_log_table_partial(request: Request):
+    error = None
+    audit_display = []
+    try:
+        sessions = await api_client.get_audit_sessions()
+        servers = await api_client.get_servers()
+        users = await api_client.get_users()
+        audit_display = [attach_audit_display(a, servers, users) for a in reversed(sessions)]
+    except Exception as exc:
+        error = _error_message(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "_audit_log_table.html",
+        {"audit_sessions": audit_display, "error": error, "is_admin": True},
+    )

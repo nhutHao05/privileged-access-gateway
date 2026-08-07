@@ -275,3 +275,7 @@ td.checkbox-cell input[type="checkbox"] {
     font-size: 12px;
     margin: -10px 0 14px;
 }
+
+.row-highlight {
+    background: rgba(250, 204, 21, 0.15);
+}

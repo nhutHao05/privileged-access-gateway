@@ -1,9 +1,10 @@
-﻿{% if not access_requests %}
+{% if not access_requests %}
 <p class="empty">Chưa có yêu cầu nào.</p>
 {% else %}
 <table>
     <thead>
         <tr>
+            <th>Người yêu cầu</th>
             <th>Server</th>
             <th>Lý do</th>
             <th>Thời lượng</th>
@@ -15,6 +16,7 @@
     <tbody>
         {% for r in access_requests %}
         <tr>
+            <td>{{ r.requester.username if r.requester else (r.user_id or "?") }}</td>
             <td>{{ r.server.name if r.server else "?" }}</td>
             <td>{{ r.reason }}</td>
             <td>{{ r.requested_minutes }} phút</td>
@@ -24,14 +26,13 @@
             <td>{{ r.requested_at.strftime("%H:%M %d/%m") if r.requested_at else "—" }}</td>
             <td>
                 {% if r.status == "pending" and is_admin %}
-                <button
+                <a
                     class="btn-small btn-approve"
-                    hx-post="/access-requests/{{ r.id }}/approve"
-                    hx-target="#requests-table-wrapper"
-                    hx-swap="innerHTML"
+                    style="text-decoration:none; display:inline-block;"
+                    href="/groups?highlight_user={{ r.user_id }}"
                 >
-                    Duyệt
-                </button>
+                    Phân quyền
+                </a>
                 <button
                     class="btn-small btn-reject"
                     hx-post="/access-requests/{{ r.id }}/reject"

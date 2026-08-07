@@ -1,5 +1,5 @@
-"""
-api_client.py — cầu nối tới API thật của Inh (Control Plane, FastAPI + Postgres).
+﻿"""
+api_client.py â€” cáº§u ná»‘i tá»›i API tháº­t cá»§a Inh (Control Plane, FastAPI + Postgres).
 """
 
 import uuid
@@ -9,20 +9,26 @@ from typing import Optional
 import httpx
 
 BASE_URL = "http://52.55.177.7:8000"
-USE_MOCK = False  # Đang gọi API thật qua Tailscale
+USE_MOCK = False  # Äang gá»i API tháº­t qua Tailscale
+
+# --- ThÃªm 3 dÃ²ng config Guacamole ngay Ä‘Ã¢y, cáº¡nh BASE_URL ---
+GUAC_BASE_URL = "https://52.55.177.7"
+GUAC_DATASOURCE = "postgresql"
+GUAC_ADMIN_USER = "guacadmin"        # nÃªn táº¡o service account riÃªng
+GUAC_ADMIN_PASS = "nghia12345"              # láº¥y tá»« env var, Ä‘á»«ng hardcode
 
 import contextvars
 
-# "Hộp tạm" giữ token JWT của người đang đăng nhập, để hàm _request() phía dưới
-# tự lấy ra và đính kèm vào mọi request gọi lên Control Plane. main.py sẽ đổ
-# token vào đây ngay khi mỗi request tới trang web bắt đầu.
+# "Há»™p táº¡m" giá»¯ token JWT cá»§a ngÆ°á»i Ä‘ang Ä‘Äƒng nháº­p, Ä‘á»ƒ hÃ m _request() phÃ­a dÆ°á»›i
+# tá»± láº¥y ra vÃ  Ä‘Ã­nh kÃ¨m vÃ o má»i request gá»i lÃªn Control Plane. main.py sáº½ Ä‘á»•
+# token vÃ o Ä‘Ã¢y ngay khi má»—i request tá»›i trang web báº¯t Ä‘áº§u.
 current_token: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "current_token", default=None
 )
 
 
 # ---------------------------------------------------------------------------
-# DỮ LIỆU MOCK — chỉ dùng khi USE_MOCK = True.
+# Dá»® LIá»†U MOCK â€” chá»‰ dÃ¹ng khi USE_MOCK = True.
 # ---------------------------------------------------------------------------
 
 _MOCK_SERVERS: list[dict] = [
@@ -49,7 +55,7 @@ _MOCK_REQUESTS: list[dict] = [
         "group_id": "g-support",
         "server_id": "s-002",
         "user_email": "user1@example.com",
-        "reason": "Cần fix bug gấp trên web-app-02",
+        "reason": "Cáº§n fix bug gáº¥p trÃªn web-app-02",
         "duration_minutes": 60,
         "status": "pending",
         "created_at": "2026-07-22T08:00:00Z",
@@ -83,9 +89,10 @@ async def update_server(
     server_id: str,
     name: str | None = None,
     ip: str | None = None,
+    protocol: str | None = None,
     tags: list[str] | None = None,
 ) -> dict:
-    """PUT {BASE_URL}/servers/{server_id}"""
+    """PATCH {BASE_URL}/servers/{server_id}"""
     if USE_MOCK:
         for s in _MOCK_SERVERS:
             if s["id"] == server_id:
@@ -93,20 +100,22 @@ async def update_server(
                     s["name"] = name
                 if ip is not None:
                     s["ip"] = ip
+                if protocol is not None:
+                    s["protocol"] = protocol
                 if tags is not None:
                     s["tags"] = tags
                 return s
         raise RuntimeError("Server not found")
-
     payload = {}
     if name is not None:
         payload["name"] = name
     if ip is not None:
         payload["ip"] = ip
+    if protocol is not None:
+        payload["protocol"] = protocol
     if tags is not None:
         payload["tags"] = tags
-
-    return await _request("PUT", f"/servers/{server_id}", json=payload)
+    return await _request("PATCH", f"/servers/{server_id}", json=payload)
 
 
 # ---------------------------------------------------------------------------
@@ -117,14 +126,14 @@ async def get_groups() -> list[dict]:
     """GET {BASE_URL}/groups/"""
     if USE_MOCK:
         return list(_MOCK_GROUPS)
-    return await _request("GET", "/auth/groups/")  # <-- SỬA THÀNH THẾ NÀY
+    return await _request("GET", "/auth/groups/")  # <-- Sá»¬A THÃ€NH THáº¾ NÃ€Y
 
 async def create_group_backend(
     name: str,
     keycloak_group_id: str,
     description: str | None = None,
 ) -> dict:
-    """POST {BASE_URL}/auth/groups/ — tạo group bên Control Plane."""
+    """POST {BASE_URL}/auth/groups/ â€” táº¡o group bÃªn Control Plane."""
     if USE_MOCK:
         new_group = {"id": f"g-{uuid.uuid4().hex[:6]}", "name": name}
         _MOCK_GROUPS.append(new_group)
@@ -151,11 +160,11 @@ async def save_group_server_policy(
     require_approval: bool = True,
 ) -> dict:
     """
-    Tạo/cập nhật policy cho cặp (group_id, server_id).
+    Táº¡o/cáº­p nháº­t policy cho cáº·p (group_id, server_id).
 
-    Backend thật CHƯA có PATCH/PUT để sửa policy, nên nếu policy đã
-    tồn tại (theo group_id+server_id) thì phải XÓA đi rồi TẠO LẠI —
-    nếu không sẽ bị lỗi 400 "Policy đã tồn tại".
+    Backend tháº­t CHÆ¯A cÃ³ PATCH/PUT Ä‘á»ƒ sá»­a policy, nÃªn náº¿u policy Ä‘Ã£
+    tá»“n táº¡i (theo group_id+server_id) thÃ¬ pháº£i XÃ“A Ä‘i rá»“i Táº O Láº I â€”
+    náº¿u khÃ´ng sáº½ bá»‹ lá»—i 400 "Policy Ä‘Ã£ tá»“n táº¡i".
     """
     if USE_MOCK:
         for p in _MOCK_POLICIES:
@@ -211,7 +220,7 @@ async def list_access_requests() -> list[dict]:
 
 
 async def create_access_request(
-    group_id: Optional[str] = None,   # <-- sửa thành Optional
+    group_id: Optional[str] = None,   # <-- sá»­a thÃ nh Optional
     server_id: str = None,
     reason: str = None,
     duration_minutes: int = 60
@@ -238,7 +247,7 @@ async def create_access_request(
         "reason": reason,
         "duration_minutes": duration_minutes,
     }
-    if group_id:   # chỉ thêm group_id nếu có giá trị
+    if group_id:   # chá»‰ thÃªm group_id náº¿u cÃ³ giÃ¡ trá»‹
         payload["group_id"] = group_id
 
     return await _request("POST", "/access/requests/", json=payload)
@@ -261,15 +270,15 @@ async def review_access_request(request_id: str, status: str) -> dict:
     )
 
 async def get_my_access_requests() -> list[dict]:
-    """Gọi API /access/requests/my của Control Plane, trả về request của chính user (theo token)."""
+    """Gá»i API /access/requests/my cá»§a Control Plane, tráº£ vá» request cá»§a chÃ­nh user (theo token)."""
     if USE_MOCK:
-        return list(_MOCK_REQUESTS)   # mock đơn giản
+        return list(_MOCK_REQUESTS)   # mock Ä‘Æ¡n giáº£n
     return await _request("GET", "/access/requests/my")
 
 async def get_my_user_id() -> str | None:
-    """Trả về ID của user hiện tại trong DB Control Plane (dùng token)."""
+    """Tráº£ vá» ID cá»§a user hiá»‡n táº¡i trong DB Control Plane (dÃ¹ng token)."""
     if USE_MOCK:
-        # Trong mock, không có user thật, trả về None
+        # Trong mock, khÃ´ng cÃ³ user tháº­t, tráº£ vá» None
         return None
     try:
         user = await _request("GET", "/auth/users/me")
@@ -278,7 +287,7 @@ async def get_my_user_id() -> str | None:
         return None
     
 async def get_my_active_grants() -> list[dict]:
-    """Gọi API /access/grants/my để lấy quyền đang hoạt động của user hiện tại."""
+    """Gá»i API /access/grants/my Ä‘á»ƒ láº¥y quyá»n Ä‘ang hoáº¡t Ä‘á»™ng cá»§a user hiá»‡n táº¡i."""
     if USE_MOCK:
         return list(_MOCK_GRANTS)
     return await _request("GET", "/access/grants/my")
@@ -320,11 +329,11 @@ async def revoke_grant(grant_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Helper dùng chung
+# Helper dÃ¹ng chung
 # ---------------------------------------------------------------------------
 
 async def _request(method: str, path: str, **kwargs) -> dict | list:
-    """Gọi Control Plane thật với timeout vọt lên 15s tránh drop kết nối Tailscale."""
+    """Gá»i Control Plane tháº­t vá»›i timeout vá»t lÃªn 15s trÃ¡nh drop káº¿t ná»‘i Tailscale."""
     headers = kwargs.pop("headers", {}) or {}
     token = current_token.get()
     if token:
@@ -338,7 +347,7 @@ async def _request(method: str, path: str, **kwargs) -> dict | list:
         return response.json()
 
 async def get_users() -> list[dict]:
-    """Lấy danh sách tất cả users từ Control Plane."""
+    """Láº¥y danh sÃ¡ch táº¥t cáº£ users tá»« Control Plane."""
     if USE_MOCK:
         return []
     return await _request("GET", "/auth/users/")        
@@ -347,9 +356,9 @@ async def create_user_backend(
     username: str,
     email: str | None = None,
     full_name: str | None = None,
-    keycloak_sub: str | None = None,   # THÊM DÒNG NÀY
+    keycloak_sub: str | None = None,   # THÃŠM DÃ’NG NÃ€Y
 ) -> dict:
-    """POST {BASE_URL}/auth/users/ — tạo user bên Control Plane."""
+    """POST {BASE_URL}/auth/users/ â€” táº¡o user bÃªn Control Plane."""
     if USE_MOCK:
         return {"id": f"u-{uuid.uuid4().hex[:6]}", "username": username}
     payload = {"username": username}
@@ -357,24 +366,92 @@ async def create_user_backend(
         payload["email"] = email
     if full_name:
         payload["full_name"] = full_name
-    if keycloak_sub:                     # THÊM KHỐI NÀY
+    if keycloak_sub:                     # THÃŠM KHá»I NÃ€Y
         payload["keycloak_sub"] = keycloak_sub
     return await _request("POST", "/auth/users/", json=payload)
 
-async def create_policy(group_id: str, server_id: str, policy: str = "allow", duration: int = 60) -> dict:
-    payload = {
-        "group_id": group_id,
-        "server_id": server_id,
-        "policy": policy,
-        "duration": duration
-    }
-    return await _request("POST", "/policy/group-server/", json=payload)
+async def delete_group_backend(group_id: str) -> None:
+    """DELETE {BASE_URL}/auth/groups/{group_id}"""
+    if USE_MOCK:
+        return
+    await _request("DELETE", f"/auth/groups/{group_id}")
 
-async def delete_policy(policy_id: str) -> dict:
-    return await _request("DELETE", f"/policy/group-server/{policy_id}")
+async def remove_user_from_group(user_id: str, group_id: str) -> None:
+    """DELETE {BASE_URL}/auth/users/{user_id}/groups/{group_id}"""
+    if USE_MOCK:
+        return
+    await _request("DELETE", f"/auth/users/{user_id}/groups/{group_id}")
 
-async def delete_group_server_policy(policy_id: str) -> dict:
-    """DELETE {BASE_URL}/policy/group-server/{policy_id}"""
+async def get_audit_sessions() -> list[dict]:
+    """GET {BASE_URL}/audit/sessions/ â€” lá»‹ch sá»­ session: user, server, thá»i gian, tráº¡ng thÃ¡i."""
+    if USE_MOCK:
+        return []
+    return await _request("GET", "/audit/sessions/")
+
+async def assign_user_to_group(user_id: str, group_id: str) -> dict:
+    """POST {BASE_URL}/auth/users/{user_id}/groups/{group_id} â€” gÃ¡n user vÃ o group."""
     if USE_MOCK:
         return {"message": "mock ok"}
-    return await _request("DELETE", f"/policy/group-server/{policy_id}")
+    return await _request("POST", f"/auth/users/{user_id}/groups/{group_id}")
+
+
+# ---------------------------------------------------------------------------
+# Guacamole â€” kill session khi Admin thu há»“i quyá»n
+# ---------------------------------------------------------------------------
+
+async def _get_guac_admin_token() -> str:
+    """Login láº¥y token admin cá»§a Guacamole (khÃ´ng cache vÃ¬ token háº¿t háº¡n)."""
+    async with httpx.AsyncClient(base_url=GUAC_BASE_URL, timeout=15.0, verify=False) as client:
+        resp = await client.post(
+            "/api/tokens",
+            data={"username": GUAC_ADMIN_USER, "password": GUAC_ADMIN_PASS},
+        )
+        resp.raise_for_status()
+        return resp.json()["authToken"]
+
+
+async def kill_guacamole_session(connection_id: str, username: str | None = None) -> None:
+    """Ngáº¯t (cÃ¡c) active connection cá»§a Guacamole á»©ng vá»›i connection_id."""
+    try:
+        token = await _get_guac_admin_token()
+        async with httpx.AsyncClient(base_url=GUAC_BASE_URL, timeout=15.0, verify=False) as client:
+            resp = await client.get(
+                f"/api/session/data/{GUAC_DATASOURCE}/activeConnections",
+                params={"token": token},
+            )
+            resp.raise_for_status()
+            active = resp.json()
+
+            to_remove = [
+                active_id
+                for active_id, info in active.items()
+                if info.get("connectionIdentifier") == connection_id
+                and (username is None or info.get("username") == username)
+            ]
+
+            if not to_remove:
+                return
+
+            patch_body = [{"op": "remove", "path": f"/{active_id}"} for active_id in to_remove]
+            await client.patch(
+                f"/api/session/data/{GUAC_DATASOURCE}/activeConnections",
+                params={"token": token},
+                json=patch_body,
+            )
+    except Exception as exc:
+        print(f"=== [WARN] KhÃ´ng thá»ƒ kill session Guacamole: {exc}")
+
+async def revoke_grant_and_kill(grant_id: str) -> None:
+    cid = None
+    try:
+        gs = await list_active_grants()
+        ss = await get_servers()
+        g = next((x for x in gs if str(x.get("id")) == str(grant_id)), None)
+        if g:
+            s = next((x for x in ss if x["id"] == g.get("server_id")), None)
+            if s: cid = s.get("guacamole_connection_id")
+    except Exception:
+        pass
+    await revoke_grant(grant_id)
+    if cid:
+        await kill_guacamole_session(cid)

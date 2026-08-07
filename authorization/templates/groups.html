@@ -16,6 +16,7 @@
                 <a href="/servers">Quản lý server</a>
                 <a href="/active-grants">Quyền đang active</a>
                 <a href="/groups" class="active">Nhóm & phân quyền</a>
+                <a href="/audit-log">Audit Log</a>
             </nav>
         </header>
 
@@ -48,7 +49,7 @@
                 Chọn Group để gán quyền luôn — Keycloak Role và Control
                 Plane Group sẽ được gán đồng thời.
             </p>
-            <form hx-post="/users/create" hx-target="#groups-table-wrapper" hx-swap="innerHTML">
+            <form hx-post="/users/create" hx-target="#users-table-wrapper" hx-swap="innerHTML">
                 <div class="form-row">
                     <label>Username</label>
                     <input type="text" name="username" required>
@@ -65,17 +66,19 @@
                     <label>Password tạm</label>
                     <input type="text" name="temp_password" required>
                 </div>
-                <div class="form-row">
-                    <label>Gán vào Group</label>
-                    <select name="group_id">
-                        <option value="">-- Không gán --</option>
-                        {% for g in groups %}
-                        <option value="{{ g.id }}">{{ g.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+               
                 <button type="submit">Tạo User</button>
             </form>
+        </section>
+        <section class="card">
+            <h2>Danh sách User</h2>
+            <p class="note">
+                Toàn bộ user hiện có. Gán user vào group ở đây — độc lập
+                với việc tạo group.
+            </p>
+            <div id="users-table-wrapper">
+                {% include "_users_table.html" %}
+            </div>
         </section>
 
         <section class="card">

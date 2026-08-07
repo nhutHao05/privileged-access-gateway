@@ -9,7 +9,47 @@
 {% else %}
 {% for g in groups %}
 <div class="group-block">
-    <h3>{{ g.name }}</h3>
+    <h3>
+        {{ g.name }}
+        {% if is_admin %}
+        <button
+            class="btn-small btn-danger"
+            hx-delete="/groups/{{ g.id }}"
+            hx-target="#groups-table-wrapper"
+            hx-swap="innerHTML"
+            hx-confirm="Xóa cả group '{{ g.name }}'? Cần gỡ hết thành viên trước nếu còn ai trong nhóm."
+        >
+            Xóa Group
+        </button>
+        {% endif %}
+    </h3>
+
+    {% if g.users %}
+    <div class="group-members">
+        <strong>Thành viên ({{ g.users|length }}):</strong>
+        <ul>
+            {% for u in g.users %}
+            <li>
+                {{ u.username }}
+                {% if is_admin %}
+                <button
+                    class="btn-small btn-danger"
+                    hx-delete="/groups/{{ g.id }}/users/{{ u.id }}"
+                    hx-target="#groups-table-wrapper"
+                    hx-swap="innerHTML"
+                    hx-confirm="Gỡ user '{{ u.username }}' khỏi group '{{ g.name }}'?"
+                >
+                    Gỡ
+                </button>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% else %}
+    <p class="empty-small">Chưa có thành viên nào.</p>
+    {% endif %}
+
     <table>
         <thead>
             <tr>

@@ -1,0 +1,50 @@
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+
+<table>
+    <thead>
+        <tr>
+            <th>User</th>
+            <th>Server</th>
+            <th>Bắt đầu</th>
+            <th>Kết thúc</th>
+            <th>Trạng thái</th>
+            <th>Recording</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for a in audit_sessions %}
+        <tr>
+            <td>{{ a.username }}</td>
+            <td>{{ a.server_name }}</td>
+            <td>{{ a.started_at.strftime("%d/%m/%Y %H:%M") if a.started_at else "—" }}</td>
+            <td>
+                {% if a.ended_at %}
+                    {{ a.ended_at.strftime("%d/%m/%Y %H:%M") }}
+                {% else %}
+                    <span class="badge">Đang diễn ra</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if a.status == "active" %}
+                    Đang hoạt động
+                {% elif a.status == "revoked" %}
+                    Đã thu hồi
+                {% else %}
+                    Hoàn tất
+                {% endif %}
+            </td>
+            <td>
+                {% if a.recording_url %}
+                    <a href="{{ a.recording_url }}" target="_blank">Xem video</a>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">Chưa có phiên nào được ghi nhận.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>

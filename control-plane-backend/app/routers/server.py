@@ -4,10 +4,10 @@ from typing import List
 from uuid import UUID
 
 from app.schemas.server import ServerCreate, ServerResponse, ServerUpdate
-from app.models.auth_rbac import Server, AuditLog
+from app.schemas.whitelist import WhitelistAdd, WhitelistEntryResponse
+from app.models.auth_rbac import Server, AuditLog, User, ServerWhitelist
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.auth_rbac import User
 
 router = APIRouter(
     prefix="/servers",
@@ -108,5 +108,55 @@ def delete_server(
     )
     db.add(audit)
     db.delete(server)
+    db.commit()
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SSH WHITELIST — Lớp bảo mật thứ 2: Kiểm soát user cụ thể được SSH vào server
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# 5. Lấy danh sách whitelist của 1 server
+@router.get("/{server_id}/whitelist", response_model=List[WhitelistEntryResponse])
+def get_server_whitelist(server_id: UUID, db: Session = Depends(get_db)):
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Không tìm thấy Server.")
+    return db.query(ServerWhitelist).filter(ServerWhitelist.server_id == server_id).all()
+
+# 6. Thêm user vào whitelist server
+@router.post("/{server_id}/whitelist", response_model=WhitelistEntryResponse, status_code=status.HTTP_201_CREATED)
+def add_user_to_whitelist(server_id: UUID, payload: WhitelistAdd, db: Session = Depends(get_db)):
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Không tìm thấy Server.")
+
+    user = db.query(User).filter(User.id == payload.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy User.")
+
+    existing = db.query(ServerWhitelist).filter(
+        ServerWhitelist.server_id == server_id,
+        ServerWhitelist.user_id == payload.user_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="User đã có trong whitelist server này.")
+
+    entry = ServerWhitelist(server_id=server_id, user_id=payload.user_id)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+# 7. Gỡ user khỏi whitelist server
+@router.delete("/{server_id}/whitelist/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_user_from_whitelist(server_id: UUID, user_id: UUID, db: Session = Depends(get_db)):
+    entry = db.query(ServerWhitelist).filter(
+        ServerWhitelist.server_id == server_id,
+        ServerWhitelist.user_id == user_id
+    ).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="User không có trong whitelist server này.")
+    db.delete(entry)
     db.commit()
     return None

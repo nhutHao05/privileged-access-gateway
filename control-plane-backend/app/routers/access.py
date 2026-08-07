@@ -8,7 +8,7 @@ from app.schemas.access import (
     AccessRequestCreate, AccessRequestResponse,
     AccessRequestReview, ActiveGrantResponse
 )
-from app.models.auth_rbac import AccessRequest, ActiveGrant, User, Server, GroupServerPolicy, Group, SessionLog, AuditLog
+from app.models.auth_rbac import AccessRequest, ActiveGrant, User, Server, GroupServerPolicy, Group, SessionLog, AuditLog, ServerWhitelist
 from app.core.database import get_db, SessionLocal
 from app.core.scheduler import scheduler
 from app.core.auth import get_current_user
@@ -90,6 +90,19 @@ def create_access_request(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Thời gian xin ({payload.requested_minutes} phút) vượt quá giới hạn tối đa ({max_allowed_minutes} phút)."
                 )
+
+    # ── Lớp bảo mật thứ 2: Kiểm tra SSH Whitelist ──
+    whitelist_entries = db.query(ServerWhitelist).filter(
+        ServerWhitelist.server_id == payload.server_id
+    ).all()
+    # Nếu server có whitelist (có ít nhất 1 entry) → user phải nằm trong đó
+    if whitelist_entries:
+        whitelisted_user_ids = [e.user_id for e in whitelist_entries]
+        if target_user_id not in whitelisted_user_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User không nằm trong Whitelist SSH của server này. Liên hệ Admin để được thêm vào."
+            )
 
     new_request = AccessRequest(
         user_id=target_user_id,

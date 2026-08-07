@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Table, ARRAY
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Table, ARRAY, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -109,3 +109,19 @@ class AuditLog(Base):
     target_id = Column(String, nullable=True)
     details = Column(String, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
+
+class ServerWhitelist(Base):
+    __tablename__ = 'server_whitelist'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    server_id = Column(UUID(as_uuid=True), ForeignKey('servers.id'), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships để join lấy tên
+    user = relationship("User", lazy="joined")
+    server = relationship("Server", lazy="joined")
+
+    __table_args__ = (
+        # UNIQUE constraint: 1 user chỉ xuất hiện 1 lần trong whitelist mỗi server
+        UniqueConstraint('server_id', 'user_id', name='uq_server_user_whitelist'),
+    )

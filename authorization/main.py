@@ -694,7 +694,11 @@ async def revoke_grant_route(request: Request, grant_id: str):
         error = "Bạn không có quyền (chỉ Admin)."
     else:
         try:
-            await api_client.revoke_grant(grant_id)
+            # revoke_grant_and_kill() tự lo cả revoke bên Control Plane
+            # lẫn kill session Guacamole tương ứng (tra guacamole_connection_id
+            # từ grant -> server), nên không cần lặp lại logic kill ở đây nữa.
+            await api_client.revoke_grant_and_kill(grant_id)
+
         except Exception as exc:
             error = _error_message(exc)
 
